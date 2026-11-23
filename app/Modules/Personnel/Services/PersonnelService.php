@@ -225,15 +225,18 @@ class PersonnelService
         return Documents::download($req, 'person', $model, $tplId, __('doc.file_person', array('name' => $r['name'], 'no' => $r['staff_no'])), 'person', (int) $r['id']);
     }
 
-    /** Validate and encrypt a new ID number; refuses one already used by another person. */
+    /**
+     * Encrypt a new ID number; refuses one already used by another person. Any letters, digits or other
+     * characters are accepted (up to 30), whatever the ID type: the format is not checked.
+     */
     public static function idParts($type, $number, $personId)
     {
         $number = strtoupper(trim((string) $number));
         if ($number === '') {
             return array('id_number_enc' => null, 'id_number_hash' => null, 'id_number_mask' => null);
         }
-        if (($type === '' || $type === null || $type === 'resident_id') && !Crypto::validResidentId($number)) {
-            throw ValidationException::field('id_number', 'staff.err.id_invalid');
+        if (mb_strlen($number) > 30) {
+            throw ValidationException::field('id_number', 'validation.max', array('field' => __('staff.field.id_number'), 'max' => 30));
         }
         $hash = Crypto::blindIndex($number);
         $dup = DB::table('personnel_profiles p')->active()->where('p.id_number_hash', $hash)->where('p.id', '<>', (int) $personId)->exists();

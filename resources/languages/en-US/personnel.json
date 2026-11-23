@@ -82,7 +82,6 @@
   "staff.ach.obtained_date": "Date",
   "staff.ach.issuer": "Issued by",
   "staff.ach.certificate_no": "Certificate no.",
-  "staff.err.id_invalid": "The ID number is not valid (an 18-character resident ID must pass the check digit)",
   "staff.err.id_taken": "This ID number is already recorded for another person",
   "staff.err.not_self_editable": "“{field}” cannot be changed by yourself; ask an administrator",
   "staff.err.record_gone": "This entry was deleted or changed meanwhile; refresh and try again",

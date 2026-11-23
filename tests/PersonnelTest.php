@@ -60,9 +60,6 @@ class PersonnelTest extends TestCase
         $this->ok(Crypto::encrypt(self::ID1) !== $c, 'random IV');
         $this->same(Crypto::blindIndex(self::ID1), Crypto::blindIndex(strtolower(self::ID1)), 'index ignores case');
         $this->same('1101**********002X', Crypto::mask(self::ID1));
-        $this->ok(Crypto::validResidentId(self::ID1) && Crypto::validResidentId(self::ID2), 'valid ids');
-        $this->ok(!Crypto::validResidentId('110105194912310021'), 'bad check digit');
-        $this->ok(!Crypto::validResidentId('110105194913310028'), 'bad date');
     }
 
     public function testAdminEditsFullRecordWithEncryptedId()
@@ -91,11 +88,15 @@ class PersonnelTest extends TestCase
         $this->same('计算机', (string) DB::value('SELECT major FROM personnel_education WHERE id = ?', array($eduId)));
         $this->same(0, (int) DB::value('SELECT COUNT(*) FROM personnel_work_experience WHERE person_id = ?', array($this->f['wang'])));
 
-        // duplicate and invalid numbers
+        // duplicates are refused; any letters, digits or other characters are accepted, up to 30
         $r = $this->request('PUT', '/api/v1/personnel/' . $this->f['zhou'], array('profile' => array('id_number' => $this->id1)));
         $this->status(422, $r, 'same ID on another person');
-        $r = $this->request('PUT', '/api/v1/personnel/' . $this->f['zhou'], array('profile' => array('id_number' => '110105194912310021')));
-        $this->status(422, $r, 'invalid check digit');
+        $free = 'ab-证件' . $this->sfx . '7';
+        $r = $this->request('PUT', '/api/v1/personnel/' . $this->f['zhou'], array('profile' => array('id_type' => 'resident_id', 'id_number' => $free)));
+        $this->status(200, $r, 'free-form number accepted even as a resident ID');
+        $this->same(Crypto::mask(strtoupper($free)), (string) DB::value('SELECT id_number_mask FROM personnel_profiles WHERE id = ?', array($this->f['zhou'])));
+        $r = $this->request('PUT', '/api/v1/personnel/' . $this->f['zhou'], array('profile' => array('id_number' => str_repeat('9', 31))));
+        $this->status(422, $r, 'longer than 30');
         $hist = $this->data($this->request('GET', '/api/v1/personnel/' . $this->f['wang'] . '/history'));
         $this->ok(count($hist) >= 3, 'history recorded');
         $this->notContains($this->id1, json_encode($hist), 'history never shows the full number');
@@ -246,15 +247,15 @@ class PersonnelTest extends TestCase
         $tmp = tempnam(sys_get_temp_dir(), 'imp');
         file_put_contents($tmp, Xlsx::write(array('工号', '姓名*', '性别*', '部门*', '岗位', '证件号码', '入职日期'), array(
             array('', '赵新', '男', '技术部' . $this->sfx . '/软件组', '工程师', $this->id2, '2024/3/1'),
-            array('', '钱多', '女', '综合部' . $this->sfx, '', '', '2024年5月6日'),
-            array('', '孙错', '未知', '不存在的部门', '', '123', ''),
+            array('', '钱多', '女', '综合部' . $this->sfx, '', 'e护照' . $this->sfx, '2024年5月6日'),
+            array('', '孙错', '未知', '不存在的部门', '', str_repeat('1', 31), ''),
         )));
         $r = $this->upload('/api/v1/staff-import/check', array(array('path' => $tmp, 'name' => 'staff.xlsx')));
         $this->status(200, $r);
         $res = $this->data($r);
-        $this->same(2, $res['ok']);
+        $this->same(2, $res['ok'], 'a free-form ID number is accepted');
         $this->same(1, $res['bad']);
-        $this->same(3, count($res['rows'][2]['errors']), 'gender, department and ID problems');
+        $this->same(3, count($res['rows'][2]['errors']), 'gender, department and ID longer than 30');
         $run = $this->data($this->request('POST', '/api/v1/staff-import/run', array('token' => $res['token'])));
         $this->same(array('created' => 2, 'skipped' => 1), $run);
         $this->same('2024-05-06', (string) DB::value("SELECT hire_date FROM personnel_profiles WHERE name = '钱多' ORDER BY id DESC LIMIT 1"));

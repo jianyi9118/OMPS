@@ -82,7 +82,6 @@
   "staff.ach.obtained_date": "获得日期",
   "staff.ach.issuer": "颁发单位",
   "staff.ach.certificate_no": "证书编号",
-  "staff.err.id_invalid": "证件号码不正确（18 位居民身份证需通过校验位检查）",
   "staff.err.id_taken": "这个证件号码已登记在其他人员的档案中",
   "staff.err.not_self_editable": "“{field}”不能由本人修改，请联系管理员",
   "staff.err.record_gone": "这条记录已被删除或修改，请刷新后再试",

@@ -79,10 +79,7 @@ class WorkbenchTest extends TestCase
         // department head: the department only
         $this->login($f['uLead']['username']);
         $this->status(200, $this->request('GET', '/', null, array(), array('Accept' => 'text/html')));
-        $rr = $this->request('GET', '/api/v1/workbench');
-        fwrite(STDERR, substr($rr->body, 0, 600) . "
-");
-        $d = $this->data($rr);
+        $d = $this->data($this->request('GET', '/api/v1/workbench'));
         $this->same('dept', $d['kind']);
         $titles = array_map(function ($p) {
             return $p['title'];

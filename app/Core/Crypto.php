@@ -100,25 +100,4 @@ class Crypto
         }
         return mb_substr($v, 0, $head) . str_repeat('*', $len - $head - $tail) . mb_substr($v, -$tail);
     }
-
-    /** Mainland resident ID: 18 characters with the ISO 7064 check digit. */
-    public static function validResidentId($id)
-    {
-        $id = strtoupper((string) $id);
-        if (!preg_match('/^\d{17}[\dX]$/', $id)) {
-            return false;
-        }
-        $w = array(7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2);
-        $sum = 0;
-        for ($i = 0; $i < 17; $i++) {
-            $sum += (int) $id[$i] * $w[$i];
-        }
-        $check = '10X98765432';
-        if ($check[$sum % 11] !== $id[17]) {
-            return false;
-        }
-        $birth = substr($id, 6, 8);
-        $d = \DateTime::createFromFormat('Ymd', $birth);
-        return $d !== false && $d->format('Ymd') === $birth;
-    }
 }
