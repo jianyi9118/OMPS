@@ -1,0 +1,11 @@
+<?php
+/**
+ * OMPS command line: php omps <command>
+ * Run "php omps help" for the list of commands.
+ */
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+require __DIR__ . '/app/bootstrap.php';
+
+exit(Omps\Console\Console::run($argv));

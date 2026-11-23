@@ -1,0 +1,6 @@
+{
+  "code": "files",
+  "version": "0.9.0",
+  "order": 85,
+  "depends": ["system", "org", "personnel", "plan", "perf", "report", "device", "affairs"]
+}

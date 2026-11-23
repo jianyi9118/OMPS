@@ -1,0 +1,3 @@
+# Safety net: if this whole folder is ever placed inside a web root by mistake,
+# refuse every request. Only the public/ folder may be served (design §03).
+Require all denied

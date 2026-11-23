@@ -1,0 +1,6 @@
+{
+  "code": "affairs",
+  "version": "0.5.0",
+  "order": 50,
+  "depends": ["system", "org", "plan", "perf"]
+}

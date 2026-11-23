@@ -1,0 +1,6 @@
+{
+  "code": "personnel",
+  "version": "0.2.0",
+  "order": 25,
+  "depends": ["system", "org"]
+}

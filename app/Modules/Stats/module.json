@@ -1,0 +1,6 @@
+{
+  "code": "stats",
+  "version": "0.7.0",
+  "order": 70,
+  "depends": ["system", "org", "plan"]
+}

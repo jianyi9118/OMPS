@@ -1,0 +1,6 @@
+{
+  "code": "report",
+  "version": "0.4.0",
+  "order": 45,
+  "depends": ["system", "org", "plan", "perf"]
+}

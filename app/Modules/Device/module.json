@@ -1,0 +1,6 @@
+{
+  "code": "device",
+  "version": "0.6.0",
+  "order": 60,
+  "depends": ["system", "org", "affairs"]
+}

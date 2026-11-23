@@ -1,0 +1,30 @@
+# OMPS public folder (Apache document root).
+# Pretty URLs when mod_rewrite is available; otherwise the app uses index.php?r=/path.
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # Tell PHP that rewriting works, so generated links omit index.php?r=
+    RewriteRule ^ - [E=OMPS_REWRITE:1]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Upload limits for OMPS only (stock XAMPP php.ini allows 2M per file / 8M per request).
+# Applies with mod_php (XAMPP); php.ini stays untouched. Keep in step with UPLOAD_MAX_MB in .env.
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 50M
+    php_value post_max_size 60M
+    php_value max_file_uploads 20
+</IfModule>
+<IfModule mod_php.c>
+    php_value upload_max_filesize 50M
+    php_value post_max_size 60M
+    php_value max_file_uploads 20
+</IfModule>
+
+# Never serve dot files
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
