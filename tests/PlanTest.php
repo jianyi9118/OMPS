@@ -71,8 +71,65 @@ class PlanTest extends TestCase
         $this->login($this->f['uLead']['username']);
         $r = $this->request('POST', '/api/v1/plans', array('title' => 'x', 'level' => 'annual', 'start' => '2026-01-01', 'end' => '2026-12-31', 'assignees' => array($this->f['zhou'])));
         $this->status(422, $r, 'assignee outside scope');
-        $r = $this->request('POST', '/api/v1/plans', array('title' => 'x', 'level' => 'quarter', 'start' => '2026-01-01', 'end' => '2026-03-31', 'assignees' => array($this->f['wang'])));
-        $this->status(422, $r, 'main plans are long-term or annual');
+        $r = $this->request('POST', '/api/v1/plans', array('title' => 'x', 'start' => '2026-01-01', 'end' => '2026-03-31', 'assignees' => array($this->f['wang'])));
+        $this->status(200, $r, 'leaders may start a main plan of any length');
+        $this->same('quarter', (string) DB::value('SELECT level FROM plans WHERE id = ?', array($this->data($r)['id'])));
+    }
+
+    public function testLevelFollowsTheDates()
+    {
+        $cases = array(
+            array('2026-03-18', '2026-03-18', 'day'), array('2026-03-30', '2026-04-05', 'week'), array('2026-03-02', '2026-03-20', 'month'),
+            array('2026-02-10', '2026-03-31', 'quarter'), array('2026-01-01', '2026-05-31', 'annual'), array('2026-01-01', '2026-12-31', 'annual'),
+            array('2026-11-01', '2027-02-28', 'long'), array('2026-01-01', '2030-12-31', 'long'),
+        );
+        foreach ($cases as $c) {
+            $this->same($c[2], PlanService::levelOf($c[0], $c[1]), $c[0] . ' – ' . $c[1]);
+        }
+        $y = date('Y');
+        $this->same('1–5 月', \Omps\Modules\Plan\Services\PlanLabel::auto('annual', $y . '-01-01', $y . '-05-31'), 'whole months');
+    }
+
+    /**
+     * The user's example: a long-term plan holds several multi-year goals; each goal has yearly goals; a yearly
+     * goal has goals of any length (Jan–May, Mar–Jul) given to several people, who split them further.
+     */
+    public function testGoalsNestByDates()
+    {
+        $y = (int) date('Y');
+        $this->login($this->f['uLead']['username']);
+        $plan = $this->make(array('title' => $y . '-' . ($y + 4) . '计划', 'start' => $y . '-01-01', 'end' => ($y + 4) . '-12-31', 'assignees' => array($this->f['lead'])));
+        $omps = $this->make(array('title' => 'OMPS开发', 'parent_id' => $plan, 'start' => $y . '-01-01', 'end' => ($y + 4) . '-12-31', 'assignees' => array($this->f['lead'])));
+        $robot = $this->make(array('title' => '机器人开发', 'parent_id' => $plan, 'start' => ($y + 1) . '-01-01', 'end' => ($y + 3) . '-12-31', 'assignees' => array($this->f['lead'])));
+        $year = $this->make(array('title' => $y . '年OMPS开发', 'parent_id' => $omps, 'start' => $y . '-01-01', 'end' => $y . '-12-31', 'assignees' => array($this->f['wang'], $this->f['chen'])));
+        $design = $this->make(array('title' => '制作OMPS设计图', 'parent_id' => $year, 'start' => $y . '-01-01', 'end' => $y . '-05-31', 'assignees' => array($this->f['wang'], $this->f['chen'])));
+        $front = $this->make(array('title' => 'OMPS前端开发', 'parent_id' => $year, 'start' => $y . '-03-01', 'end' => $y . '-07-31', 'assignees' => array($this->f['wang'])));
+        $level = function ($id) {
+            return (string) DB::value('SELECT level FROM plans WHERE id = ?', array($id));
+        };
+        $this->same(array('long', 'long', 'long', 'annual', 'annual', 'annual'), array_map($level, array($plan, $omps, $robot, $year, $design, $front)));
+        $this->same(2, (int) DB::value('SELECT COUNT(*) FROM plan_assignments WHERE plan_id = ?', array($design)), 'two developers');
+        $this->same(3, (int) DB::value('SELECT depth FROM plan_paths WHERE ancestor_id = ? AND descendant_id = ?', array($plan, $design)));
+        // a sub-plan cannot cover a longer period than its parent
+        $r = $this->request('POST', '/api/v1/plans', array('title' => 'x', 'parent_id' => $year, 'start' => $y . '-01-01', 'end' => ($y + 1) . '-06-30', 'assignees' => array($this->f['wang'])));
+        $this->status(422, $r, 'longer than the parent');
+        // the developers split their goal; plans longer than a quarter stay with the leader
+        $this->login($this->f['uWang']['username']);
+        $tree = $this->data($this->request('GET', '/api/v1/plans/' . $design));
+        $this->same(array('quarter', 'month', 'week', 'day'), $tree['caps']['add'], 'members add a quarter and below');
+        $this->status(422, $this->request('POST', '/api/v1/plans', array('title' => 'x', 'parent_id' => $design, 'start' => $y . '-01-01', 'end' => $y . '-04-30')), 'member: longer than a quarter');
+        $feb = $this->make(array('title' => '首页设计', 'parent_id' => $design, 'start' => $y . '-02-01', 'end' => $y . '-02-28'));
+        $this->same('month', $level($feb));
+        // a slipping schedule: the new dates are saved (with a warning past the parent) and the level follows them
+        $p = $this->data($this->request('GET', '/api/v1/plans/' . $feb));
+        $this->status(200, $this->request('PUT', '/api/v1/plans/' . $feb, array('version' => $p['version'], 'title' => '首页设计', 'start' => $y . '-02-01', 'end' => $y . '-03-31')));
+        $this->same('quarter', $level($feb), 'the level follows edited dates');
+        $this->same($y . '-Q1', (string) DB::value('SELECT period_key FROM plans WHERE id = ?', array($feb)));
+        $p = $this->data($this->request('GET', '/api/v1/plans/' . $feb));
+        $r = $this->request('PUT', '/api/v1/plans/' . $feb, array('version' => $p['version'], 'title' => '首页设计', 'start' => $y . '-02-01', 'end' => $y . '-06-15'));
+        $this->status(200, $r);
+        $this->same(1, count($this->data($r)['warnings']), 'past the goal: saved with a warning');
+        $this->same('annual', $level($feb));
     }
 
     public function testVisibilityByScope()
@@ -112,7 +169,7 @@ class PlanTest extends TestCase
         $this->login($this->f['uWang']['username']);
         $d = $this->data($this->request('GET', '/api/v1/plans/' . $annual));
         $this->ok(!$d['caps']['edit'] && !$d['caps']['del'], 'assigned task is read-only for the member');
-        $this->ok($d['caps']['add'] === array('quarter', 'month'), 'member may add sub-plans');
+        $this->ok($d['caps']['add'] === array('quarter', 'month', 'week', 'day'), 'member may add sub-plans of a quarter or less');
         $this->status(403, $this->request('PUT', '/api/v1/plans/' . $annual, array('title' => 'x', 'start' => '2026-01-01', 'end' => '2026-12-31')));
         $dq = $this->data($this->request('GET', '/api/v1/plans/' . $q));
         $r = $this->request('PUT', '/api/v1/plans/' . $q, array('version' => $dq['version'], 'title' => '第四季度 · 联调', 'start' => '2026-10-01', 'end' => '2027-01-15'));
@@ -131,7 +188,7 @@ class PlanTest extends TestCase
         $this->same(array($this->f['wang']), array_map('intval', DB::table('plan_assignments')->where('plan_id', $annual)->pluck('person_id')));
         $dl = $this->data($this->request('GET', '/api/v1/plans/' . $long));
         $this->ok(!$dl['caps']['edit'], 'unit plan is read-only for the department head');
-        $this->same(array('annual', 'quarter', 'month'), $dl['caps']['add'], 'but he may break it down');
+        $this->same(array('long', 'annual', 'quarter', 'month', 'week', 'day'), $dl['caps']['add'], 'but he may break it down, into multi-year goals too');
 
         $im = $this->data($this->request('GET', '/api/v1/plans/' . $annual . '/delete-impact'));
         $this->same(1, $im['children']);

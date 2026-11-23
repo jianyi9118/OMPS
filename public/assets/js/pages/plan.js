@@ -39,7 +39,21 @@
       default: return s === e;
     }
   }
+  /* the level follows from the dates (same rule as PlanService::levelOf) */
+  function levelOf(s, e) {
+    if (s === e) return "day";
+    var a = isoWeek(s), b = isoWeek(e);
+    if (a.year === b.year && a.week === b.week) return "week";
+    if (s.slice(0, 7) === e.slice(0, 7)) return "month";
+    if (s.slice(0, 4) === e.slice(0, 4)) return Math.ceil(+s.slice(5, 7) / 3) === Math.ceil(+e.slice(5, 7) / 3) ? "quarter" : "annual";
+    return "long";
+  }
   function autoLabel(level, s, e) {
+    var ms = +s.slice(5, 7), me = +e.slice(5, 7);
+    if (!exact(level, s, e) && s.slice(0, 4) === e.slice(0, 4) && s.slice(8) === "01" && e.slice(8) === pad(lastDay(+e.slice(0, 4), me)) && ms < me) {
+      var mm = t("plan.tl.months", { a: ms, b: me });
+      return s.slice(0, 4) === today().slice(0, 4) ? mm : t("plan.tl.year", { y: s.slice(0, 4) }) + " " + mm;
+    }
     if (exact(level, s, e)) {
       if (level === "long") return s.slice(0, 4) + "–" + e.slice(0, 4);
       if (level === "annual") return t("plan.tl.year", { y: s.slice(0, 4) });
@@ -123,22 +137,23 @@
     return meta().then(function () {
       var p = opts.plan || null, parent = opts.parent || null;
       var editing = !!p;
-      var levels = editing ? [p.level] : (opts.levels || []);
-      var level = editing ? p.level : levels[0];
+      // levels allowed here (caps.add of the parent, or any for a main plan); the default is one step below the parent
+      var levels = editing ? LEVELS : (opts.levels && opts.levels.length ? opts.levels : LEVELS);
+      var level = editing ? p.level : (!parent ? (levels.indexOf("annual") >= 0 ? "annual" : levels[0])
+        : (levels.filter(function (l) { return LEVELS.indexOf(l) > LEVELS.indexOf(parent.level); })[0] || levels[0]));
       var dates = editing ? [p.start, p.end] : defaultDates(level, parent);
       var manager = editing ? p.caps.assign : (!parent ? true : opts.manager);
       var assigned = editing ? p.assignees.slice() : (opts.defaultSelf && META.me ? [META.me] : (parent && manager ? parent.assignees.slice() : []));
       var tlMode = editing ? p.tl_mode : "auto", tlText = editing ? p.tl_text : "";
       var box = document.createElement("div");
       var fields = [];
-      if (!editing) fields.push({ name: "level", label: t("plan.field.level"), type: "select", req: true, noEmpty: true, opts: levels.map(function (l) { return [l, t("plan.level." + l)]; }) });
-      else fields.push({ name: "level_ro", label: t("plan.field.level"), type: "static", html: levelPill(p.level) });
       fields.push({ name: "title", label: t("plan.field.title"), req: true, max: 150, span2: true });
       if (!editing && !parent && META.wide) {
-        fields.push({ name: "dept_id", label: t("plan.field.scope"), type: "select", int: true, empty: t("plan.unit_plan"), opts: META.mainDepts.map(function (x) { return [x.id, x.name]; }) });
+        fields.push({ name: "dept_id", label: t("plan.field.scope"), type: "select", span2: true, int: true, empty: t("plan.unit_plan"), opts: META.mainDepts.map(function (x) { return [x.id, x.name]; }) });
       }
       fields.push({ name: "start", label: t("plan.field.start"), type: "date", req: true });
       fields.push({ name: "end", label: t("plan.field.end"), type: "date", req: true });
+      fields.push({ name: "level_ro", label: t("plan.field.level"), type: "static", span2: true, html: '<span id="pl_lv"></span>' });
       var fields2 = [];
       if (parent || (p && p.parent_id)) fields2.push({ name: "weight", label: t("plan.field.weight"), hint: t("plan.weight_hint"), max: 6 });
       fields2.push({ name: "priority", label: t("plan.field.priority"), type: "select", opts: [["high", t("plan.priority.high")], ["medium", t("plan.priority.medium")], ["low", t("plan.priority.low")]] });
@@ -146,20 +161,43 @@
       fields2.push({ name: "content", label: t("plan.field.content"), type: "textarea", max: 5000 });
       fields2 = fields2.concat(O.cf.fields(META.custom || [], false));
       var vals = editing ? { title: p.title, start: p.start, end: p.end, weight: p.parent_id ? String(p.weight) : "", priority: p.priority, goal: p.goal, content: p.content }
-        : { level: level, start: dates[0], end: dates[1], dept_id: "" };
+        : { start: dates[0], end: dates[1], dept_id: "" };
       var cvals = O.cf.values(META.custom || [], editing && p.custom ? p.custom.values : {}, false);
       Object.keys(cvals).forEach(function (k) { vals[k] = cvals[k]; });
       var f1 = O.form(fields, vals), f2 = O.form(fields2, vals);
       var f = { values: function () { var a = f1.values(), b = f2.values(); Object.keys(b).forEach(function (k) { a[k] = b[k]; }); return a; }, errors: function (m) { f1.errors(m); f2.errors(m); } };
       box.appendChild(f1.el);
       if (parent) box.insertAdjacentHTML("afterbegin", '<p class="muted" style="margin-top:0">' + O.esc(t("plan.under", { title: parent.title })) + "</p>");
+      if (!editing) {
+        // quick picks for the dates: the parent's whole period, then one period of each allowed length
+        var picks = (parent ? [["parent", t("plan.span.parent")]] : []).concat(levels.map(function (l) { return [l, t("plan.span." + l)]; }));
+        var qp = document.createElement("div");
+        qp.className = "fld span2";
+        qp.innerHTML = "<label>" + O.esc(t("plan.span.pick")) + '</label><div class="chips">' + picks.map(function (x) {
+          return '<button type="button" class="chip" data-span="' + x[0] + '">' + O.esc(x[1]) + "</button>"; }).join("") + "</div>";
+        var lvFld = box.querySelector("#pl_lv").closest(".fld");
+        lvFld.parentNode.insertBefore(qp, lvFld);
+        qp.addEventListener("click", function (e) {
+          var b = e.target.closest ? e.target.closest("[data-span]") : null;
+          if (!b) return;
+          var k = b.getAttribute("data-span"), dd = k === "parent" ? [parent.start, parent.end] : defaultDates(k, parent);
+          box.querySelector('[name="start"]').value = dd[0];
+          box.querySelector('[name="end"]').value = dd[1];
+          drawTl();
+        });
+      }
       var tl = document.createElement("div");
       tl.className = "fld";
       tl.style.marginTop = "10px";
       box.appendChild(tl);
       function drawTl() {
-        var v = f.values(), s = v.start, e = v.end, lv = editing ? p.level : v.level;
-        var opts2 = shortcuts(s, e), auto = s && e && e >= s ? autoLabel(lv, s, e) : "";
+        var v = f.values(), s = v.start, e = v.end, ok = s && e && e >= s, lv = ok ? levelOf(s, e) : "";
+        var opts2 = shortcuts(s, e), auto = ok ? autoLabel(lv, s, e) : "";
+        var lvBox = box.querySelector("#pl_lv"), bad = "";
+        if (lv && !editing && levels.indexOf(lv) < 0) {
+          bad = parent && LEVELS.indexOf(lv) < LEVELS.indexOf(parent.level) ? t("plan.err.longer_than_parent", { level: t("plan.level." + parent.level) }) : t("plan.err.member_span");
+        }
+        if (lvBox) lvBox.innerHTML = lv ? levelPill(lv) + ' <span class="' + (bad ? "em" : "muted") + '">' + O.esc(bad || t("plan.level_auto")) + "</span>" : "—";
         if (tlMode !== "text" && tlMode !== "auto" && !opts2.some(function (o) { return o[0] === tlMode; })) tlMode = "auto";
         tl.innerHTML = "<label>" + O.esc(t("plan.field.tl")) + '</label><div class="chips">' + (auto ? '<button type="button" class="chip' + (tlMode === "auto" ? " on" : "") + '" data-tl="auto">' + O.esc(t("plan.tl.auto", { label: auto })) + "</button>" : "") +
           opts2.filter(function (o) { return o[1] !== auto; }).map(function (o) { return '<button type="button" class="chip' + (tlMode === o[0] ? " on" : "") + '" data-tl="' + o[0] + '">' + O.esc(o[1]) + "</button>"; }).join("") +
@@ -173,12 +211,7 @@
       tl.addEventListener("input", function (e) { if (e.target.id === "pl_tx") { tlText = e.target.value.trim(); tlMode = tlText ? "text" : "auto"; } });
       box.addEventListener("change", function (e) {
         var n = e.target.getAttribute("name");
-        if (n === "level") {
-          var dd = defaultDates(e.target.value, parent);
-          box.querySelector('[name="start"]').value = dd[0];
-          box.querySelector('[name="end"]').value = dd[1];
-        }
-        if (n === "level" || n === "start" || n === "end") drawTl();
+        if (n === "start" || n === "end") drawTl();
       });
       if (manager && META.candidates.length) {
         var as = document.createElement("div");
@@ -193,7 +226,7 @@
         var v = f.values();
         var body = { title: v.title, start: v.start, end: v.end, priority: v.priority, goal: v.goal, content: v.content, tl_mode: tlMode, tl_text: tlMode === "text" ? tlText : "", custom: O.cf.collect(v) };
         if (v.weight !== undefined) body.weight = v.weight;
-        if (!editing) { body.level = v.level; if (parent) body.parent_id = parent.id; if (v.dept_id) body.dept_id = v.dept_id; }
+        if (!editing) { if (parent) body.parent_id = parent.id; if (v.dept_id) body.dept_id = v.dept_id; }
         if (manager && META.candidates.length) body.assignees = Array.prototype.map.call(box.querySelectorAll('input[name="pl_as"]:checked'), function (x) { return +x.value; });
         if (editing) body.version = p.version;
         var req = editing ? O.api("PUT", "/api/v1/plans/" + p.id, body) : O.api("POST", "/api/v1/plans", body);

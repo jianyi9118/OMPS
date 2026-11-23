@@ -25,13 +25,35 @@ use Omps\Engines\Permission;
  */
 class PlanService
 {
+    /**
+     * The level is not chosen: it follows from the dates (levelOf), as the smallest calendar period that
+     * holds them. A plan may hold sub-plans of its own level or lower, so a long-term plan can be split into
+     * several multi-year goals, each into yearly goals, those into goals of any length (Jan–May), and so on.
+     * Leaders may add any of those; members only plans that fit in one quarter (MEMBER_LEVELS).
+     */
     const LEVELS = array('long', 'annual', 'quarter', 'month', 'week', 'day');
-    const TOP_LEVELS = array('long', 'annual');
-    const LEADER_CHILDREN = array('long' => array('annual', 'quarter', 'month'), 'annual' => array('quarter', 'month'), 'quarter' => array('month', 'week'),
-        'month' => array('week', 'day'), 'week' => array('day'), 'day' => array());
-    const MEMBER_CHILDREN = array('long' => array('quarter', 'month'), 'annual' => array('quarter', 'month'), 'quarter' => array('month', 'week'),
-        'month' => array('week', 'day'), 'week' => array('day'), 'day' => array());
+    const MEMBER_LEVELS = array('quarter', 'month', 'week', 'day');
     const TL_MODES = array('auto', 'span', 'year', 'half', 'q', 'm', 'w', 'text');
+
+    /** Level of a date range: one day, one ISO week, one month, one quarter, one year, or longer. */
+    public static function levelOf($start, $end)
+    {
+        if ($start === $end) {
+            return 'day';
+        }
+        $ts = strtotime($start);
+        $te = strtotime($end);
+        if (date('o-W', $ts) === date('o-W', $te)) {
+            return 'week';
+        }
+        if (substr($start, 0, 7) === substr($end, 0, 7)) {
+            return 'month';
+        }
+        if (substr($start, 0, 4) === substr($end, 0, 4)) {
+            return (int) ceil((int) substr($start, 5, 2) / 3) === (int) ceil((int) substr($end, 5, 2) / 3) ? 'quarter' : 'annual';
+        }
+        return 'long';
+    }
 
     // ---------- context of the current user ----------
 
@@ -77,20 +99,42 @@ class PlanService
         return $c['person'] !== null && (int) $p['owner_person_id'] === (int) $c['person'];
     }
 
-    /** Levels the user may add under a plan (empty = none). */
+    /** Levels the user may add under a plan: its own level and lower (none under a day plan). Empty = none. */
     public static function childLevels(array $c, array $p, array $assignees)
     {
-        if (!$c['add']) {
+        if (!$c['add'] || (string) $p['level'] === 'day') {
             return array();
         }
-        $lv = (string) $p['level'];
-        if (self::manages($c, $p) || ($c['assign'] && $p['dept_id'] === null)) {
-            return self::LEADER_CHILDREN[$lv];
+        $below = array_slice(self::LEVELS, (int) array_search((string) $p['level'], self::LEVELS, true));
+        if (self::leads($c, $p)) {
+            return $below;
         }
         if (self::isAssignee($c, $assignees) || self::isOwner($c, $p)) {
-            return self::MEMBER_CHILDREN[$lv];
+            return array_values(array_intersect($below, self::MEMBER_LEVELS));
         }
         return array();
+    }
+
+    /** May the user add sub-plans here as a leader (any length, choosing the assignees)? */
+    private static function leads(array $c, array $p)
+    {
+        return self::manages($c, $p) || ($c['assign'] && $p['dept_id'] === null);
+    }
+
+    /** The error for a level that may not be added under $parent (null = allowed). */
+    private static function levelError(array $c, $parent, $level)
+    {
+        if ($parent === null) {
+            return null;
+        }
+        $allowed = self::childLevels($c, $parent, $parent['assignees']);
+        if (in_array($level, $allowed, true)) {
+            return null;
+        }
+        if (array_search($level, self::LEVELS, true) < array_search((string) $parent['level'], self::LEVELS, true)) {
+            return array('plan.err.longer_than_parent', array('level' => __('plan.level.' . $parent['level'])));
+        }
+        return array('plan.err.member_span', array());
     }
 
     public static function caps($user, array $p, array $assignees)
@@ -460,7 +504,7 @@ class PlanService
             $all[] = $d;
         }
         return array(
-            'canAddTop' => $c['assign'] && $c['add'], 'topLevels' => self::TOP_LEVELS, 'wide' => $c['wide'], 'manager' => $c['assign'],
+            'canAddTop' => $c['assign'] && $c['add'], 'topLevels' => self::LEVELS, 'wide' => $c['wide'], 'manager' => $c['assign'],
             'mainDepts' => $depts, 'filterDepts' => $all, 'candidates' => self::candidates($req->user), 'me' => $c['person'],
             'ranges' => self::ranges(), 'today' => date('Y-m-d'), 'custom' => \Omps\Engines\CustomFields::defs('plan'),
         );
@@ -477,7 +521,6 @@ class PlanService
             'goal' => 'nullable|string|max:5000', 'content' => 'nullable|string|max:5000', 'assignees' => 'nullable|array',
         );
         if ($creating) {
-            $rules['level'] = 'required|in:' . implode(',', self::LEVELS);
             $rules['parent_id'] = 'nullable|int';
             $rules['dept_id'] = 'nullable|int';
         }
@@ -486,10 +529,11 @@ class PlanService
         }
         $v = Validator::check($in, $rules, array('title' => 'plan.field.title', 'start' => 'plan.field.start', 'end' => 'plan.field.end', 'tl_text' => 'plan.field.tl_text',
             'weight' => 'plan.field.weight', 'priority' => 'plan.field.priority', 'goal' => 'plan.field.goal', 'content' => 'plan.field.content',
-            'level' => 'plan.field.level', 'assignees' => 'plan.field.assignees'));
+            'assignees' => 'plan.field.assignees'));
         if ($v['end'] < $v['start']) {
             throw ValidationException::field('end', 'plan.err.end_before_start');
         }
+        $v['level'] = self::levelOf($v['start'], $v['end']);
         if (isset($v['weight']) && $v['weight'] !== null && (float) $v['weight'] > 100) {
             throw ValidationException::field('weight', 'validation.max_num', array('field' => __('plan.field.weight'), 'max' => 100));
         }
@@ -560,20 +604,15 @@ class PlanService
         $plans = null;
         if (!empty($v['parent_id'])) {
             list($parent, $plans) = self::find($req, $v['parent_id']);
-            $levels = self::childLevels($c, $parent, $parent['assignees']);
-            if (!$levels) {
+            if (!self::childLevels($c, $parent, $parent['assignees'])) {
                 throw HttpException::forbidden();
             }
-            if (!in_array($v['level'], $levels, true)) {
-                throw ValidationException::field('level', 'plan.err.level_not_allowed');
+            $err = self::levelError($c, $parent, $v['level']);
+            if ($err) {
+                throw ValidationException::field('end', $err[0], $err[1]);
             }
-        } else {
-            if (!$c['assign'] || !$c['add']) {
-                throw HttpException::forbidden();
-            }
-            if (!in_array($v['level'], self::TOP_LEVELS, true)) {
-                throw ValidationException::field('level', 'plan.err.level_not_allowed');
-            }
+        } elseif (!$c['assign'] || !$c['add']) {
+            throw HttpException::forbidden();
         }
         $leaderMode = $c['assign'] && (!$parent || self::manages($c, $parent) || $parent['dept_id'] === null);
         // department of the new plan
@@ -649,11 +688,12 @@ class PlanService
         if (isset($in['version']) && (int) $in['version'] !== (int) $p['version']) {
             throw HttpException::conflict('error.stale');
         }
+        // the level follows the new dates; schedules slip, so dates past the parent only warn (warnings())
         $v = self::validate($in, false);
         $cfValues = isset($in['custom']) && is_array($in['custom']) ? \Omps\Engines\CustomFields::validate('plan', $in['custom'], true) : array();
         $cfBefore = $cfValues ? \Omps\Engines\CustomFields::valuesOf('plan', (int) $p['id']) : array();
         $upd = array('title' => $v['title'], 'start_date' => $v['start'], 'end_date' => $v['end'], 'time_label_mode' => $v['tl_mode'], 'time_label_text' => $v['tl_text'],
-            'period_key' => self::periodKey($p['level'], $v['start'], $v['end']), 'priority' => isset($v['priority']) ? $v['priority'] : null,
+            'level' => $v['level'], 'period_key' => self::periodKey($v['level'], $v['start'], $v['end']), 'priority' => isset($v['priority']) ? $v['priority'] : null,
             'goal' => isset($v['goal']) ? $v['goal'] : null, 'content' => isset($v['content']) ? $v['content'] : null, 'updated_at' => now(), 'updated_by' => $req->userId());
         if ($p['parent_id'] !== null && isset($v['weight']) && $v['weight'] !== null && $v['weight'] !== '') {
             $upd['local_weight'] = (float) $v['weight'];

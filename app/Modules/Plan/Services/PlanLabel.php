@@ -68,6 +68,13 @@ class PlanLabel
             return $s === $today ? __('plan.tl.today') : substr($s, 5);
         }
         $y = substr($today, 0, 4);
+        // whole months of one year: "1–5 月"
+        $ms = (int) substr($s, 5, 2);
+        $me = (int) substr($e, 5, 2);
+        if (substr($s, 0, 4) === substr($e, 0, 4) && substr($s, 8) === '01' && $e === sprintf('%s-%02d-%02d', substr($e, 0, 4), $me, self::lastDay(substr($e, 0, 4), $me)) && $ms < $me) {
+            $m = __('plan.tl.months', array('a' => $ms, 'b' => $me));
+            return substr($s, 0, 4) === $y ? $m : __('plan.tl.year', array('y' => substr($s, 0, 4))) . ' ' . $m;
+        }
         if (substr($s, 0, 4) === $y && substr($e, 0, 4) === $y) {
             return substr($s, 5) . ' – ' . substr($e, 5);
         }
