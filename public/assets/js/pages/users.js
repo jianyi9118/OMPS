@@ -122,14 +122,15 @@
     return O.api("GET", "/api/v1/users/options", null, { include_person: includePerson || "" }).then(function (o) { opts = o; return o; }, function (e) { O.failed(e); throw e; });
   }
 
+  // The row buttons depend on opts.canEdit / canDel, so the list is drawn only after the options are in
+  // (loading both at once sometimes drew the rows before the permissions arrived, without any buttons).
   loadOptions(0).then(function () {
     var sel = document.getElementById("u_role");
     opts.roles.forEach(function (r) { sel.insertAdjacentHTML("beforeend", '<option value="' + r.id + '">' + O.esc(r.name) + "</option>"); });
     document.getElementById("u_add").hidden = !opts.canAdd;
-  });
+  }).then(load, load);
   document.getElementById("u_add").addEventListener("click", add);
   document.getElementById("u_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; load(); }, 350));
   document.getElementById("u_role").addEventListener("change", function (e) { state.role_id = e.target.value; state.page = 1; load(); });
   document.getElementById("u_status").addEventListener("change", function (e) { state.status = e.target.value; state.page = 1; load(); });
-  load();
 })();
