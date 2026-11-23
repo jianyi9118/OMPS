@@ -39,4 +39,4 @@ collector/  设备采集客户端（PowerShell 脚本和安装文件，不在网
 omps        命令行入口
 ```
 
-安装步骤见 `docs/INSTALL.md`。
+安装步骤见 `docs/INSTALL.md`（英文版 `docs/INSTALL.en.md`）。

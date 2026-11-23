@@ -1,5 +1,7 @@
 # OMPS 安装说明（XAMPP 7.2.3，Windows）
 
+[English version](INSTALL.en.md)
+
 适用对象：负责服务器的同事。全程不需要联网，不需要安装任何额外的软件或 PHP 扩展。
 
 ## 1. 准备
