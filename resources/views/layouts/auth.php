@@ -20,6 +20,7 @@ $boot = array('base' => Url::basePath(), 'rewrite' => Url::rewrite(), 'csrf' => 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($title) ?> · <?= e($unitName !== '' ? $unitName : __('app.name')) ?></title>
+<link rel="icon" type="image/png" href="<?= e(asset('img/favicon.png')) ?>">
 <link rel="stylesheet" href="<?= e(asset('css/omps.css')) ?>">
 <?php if ($theme['css'] !== ''): ?><style><?= $theme['css'] ?></style><?php endif; ?>
 </head>

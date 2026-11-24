@@ -194,7 +194,7 @@
   "theme.logo": "Logo",
   "theme.logo_upload": "Upload logo",
   "theme.logo_remove": "Use the first letter of the unit name",
-  "theme.logo_hint": "A square picture works best (PNG or JPG)",
+  "theme.logo_hint": "Without an upload, the built-in pen-and-document picture is used. A square picture works best (PNG or JPG)",
   "theme.save_hint": "The page reloads after saving; everyone can still switch light / dark at the top right",
   "theme.err.value": "Invalid theme setting",
   "theme.err.banners": "At most 5 login pictures",

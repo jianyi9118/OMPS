@@ -274,7 +274,7 @@
         radio("th_nav", t("theme.nav"), [["dark", t("theme.nav_dark")], ["light", t("theme.nav_light")]], d.nav) +
         radio("th_top", t("theme.top"), [["white", t("theme.top_white")], ["primary", t("theme.top_primary")]], d.top) +
         radio("th_def", t("theme.default"), [["auto", t("theme.mode.auto")], ["light", t("theme.mode.light")], ["dark", t("theme.mode.dark")]], d.default) +
-        '<div class="fld"><label>' + O.esc(t("theme.logo")) + '</label><div class="isrow"><div class="logo" style="width:40px;height:40px">' + (d.logo ? '<img alt="" src="' + O.esc(d.logo) + '">' : O.esc((d.unit_name || "O").slice(0, 1))) +
+        '<div class="fld"><label>' + O.esc(t("theme.logo")) + '</label><div class="isrow"><div class="logo' + (d.logo ? "" : " def") + '" style="width:40px;height:40px"><img alt="" src="' + O.esc(d.logo || O.boot.base + "/assets/img/logo.png") + '">' +
         '</div><button type="button" class="btn sm" id="th_logo">' + O.icon("upload", 14) + " " + O.esc(t("theme.logo_upload")) + "</button>" + (d.logo ? '<button type="button" class="btn sm danger" id="th_nologo">' + O.esc(t("theme.logo_remove")) + "</button>" : "") +
         '</div><span class="hint">' + O.esc(t("theme.logo_hint")) + "</span></div>" +
         '<div><button type="button" class="btn pri" id="th_save">' + O.esc(t("common.save")) + '</button> <span class="muted" style="font-size:12.5px">' + O.esc(t("theme.save_hint")) + "</span></div></div></div>";

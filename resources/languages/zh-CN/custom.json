@@ -194,7 +194,7 @@
   "theme.logo": "Logo",
   "theme.logo_upload": "上传 Logo",
   "theme.logo_remove": "恢复为单位名称首字",
-  "theme.logo_hint": "正方形图片效果最好（PNG 或 JPG）",
+  "theme.logo_hint": "不上传时使用系统自带的钢笔签字图标。上传正方形图片效果最好（PNG 或 JPG）",
   "theme.save_hint": "保存后页面会重新载入；每个人仍可在右上角切换浅色 / 深色",
   "theme.err.value": "主题设置不正确",
   "theme.err.banners": "最多 5 张登录页图片",

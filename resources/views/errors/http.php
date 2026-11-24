@@ -7,6 +7,7 @@ use Omps\Core\Lang;
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e((string) $status) ?> · <?= e(__('app.name')) ?></title>
+<link rel="icon" type="image/png" href="<?= e(asset('img/favicon.png')) ?>">
 <link rel="stylesheet" href="<?= e(asset('css/omps.css')) ?>">
 </head>
 <body>

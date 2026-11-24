@@ -27,7 +27,6 @@ $boot = array(
 $icon = function ($k, $s = 16) {
     return '<svg width="' . (int) $s . '" height="' . (int) $s . '" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true" data-icon="' . e($k) . '"></svg>';
 };
-$initial = mb_substr($unitName !== '' ? $unitName : 'OMPS', 0, 1);
 // theme (phase 7): main colour, menu / top bar style, light or dark, logo
 $theme = class_exists('Omps\\Modules\\Custom\\Services\\ThemeService') ? \Omps\Modules\Custom\Services\ThemeService::shell($u['id'])
     : array('mode' => 'auto', 'theme_attr' => '', 'classes' => '', 'css' => '', 'logo' => '');
@@ -38,6 +37,7 @@ $boot['theme'] = $theme['mode'];
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($title) ?> · <?= e($unitName !== '' ? $unitName : __('app.name')) ?></title>
+<link rel="icon" type="image/png" href="<?= e(asset('img/favicon.png')) ?>">
 <link rel="stylesheet" href="<?= e(asset('css/omps.css')) ?>">
 <?php if ($theme['css'] !== ''): ?><style><?= $theme['css'] ?></style><?php endif; ?>
 </head>
@@ -45,7 +45,7 @@ $boot['theme'] = $theme['mode'];
 <div id="root"<?= $theme['classes'] !== '' ? ' class="' . e($theme['classes']) . '"' : '' ?>>
 <div class="app" id="app">
   <aside class="side" aria-label="<?= e(__('layout.menu')) ?>">
-    <div class="brand"><div class="logo"><?php if ($theme['logo'] !== ''): ?><img alt="" src="<?= e($theme['logo']) ?>"><?php else: ?><?= e($initial) ?><?php endif; ?></div><div class="bn"><b><?= e($unitName !== '' ? $unitName : __('app.name')) ?></b><small>OMPS</small></div></div>
+    <div class="brand"><div class="logo<?= $theme['logo'] === '' ? ' def' : '' ?>"><img alt="" src="<?= e($theme['logo'] !== '' ? $theme['logo'] : asset('img/logo.png')) ?>"></div><div class="bn"><b><?= e($unitName !== '' ? $unitName : __('app.name')) ?></b><small>OMPS</small></div></div>
     <nav class="menu">
       <?php foreach ($menu as $m): ?>
         <?php if ($m['route'] !== ''): ?>
