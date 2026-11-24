@@ -13,6 +13,9 @@ use Omps\Engines\Permission;
  */
 class FamilyService
 {
+    /** Keyword fields of the family list; phone and address are encrypted and never searched. */
+    const SEARCH = array('person' => 'p.name', 'staff_no' => 'p.staff_no', 'dept' => 'd.name', 'name' => 'fa.name', 'employer' => 'fa.employer', 'position' => 'fa.position');
+
     public static function search(Request $req, array $f, $page, $size)
     {
         $full = Permission::can($req->user, 'family.sensitive');
@@ -20,9 +23,7 @@ class FamilyService
             ->whereNull('p.deleted_at')
             ->select(array('fa.*', 'p.name as person_name', 'p.staff_no', 'd.name as dept_name'));
         Permission::scopePersonnel($q, $req->user, 'p');
-        if (isset($f['kw']) && $f['kw'] !== '') {
-            $q->whereLikeAny(array('p.name', 'fa.name'), $f['kw']);
-        }
+        $q->whereFilters($f, null, self::SEARCH);
         if (!empty($f['dept_id'])) {
             $q->whereIn('p.dept_id', Permission::subtree((int) $f['dept_id']));
         }
@@ -39,7 +40,7 @@ class FamilyService
         }
         $res['rows'] = $rows;
         $res['full'] = $full;
-        Audit::log($req->user, 'family', 'family_list_viewed', 'family', null, null, null, array('page' => $res['page'], 'kw' => isset($f['kw']) ? $f['kw'] : '', 'full' => $full), $req->ip());
+        Audit::log($req->user, 'family', 'family_list_viewed', 'family', null, null, null, array('page' => $res['page'], 'kw' => isset($f['kw']) ? $f['kw'] : '', 'field' => isset($f['field']) ? $f['field'] : '', 'full' => $full), $req->ip());
         return $res;
     }
 }

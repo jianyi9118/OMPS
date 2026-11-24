@@ -19,7 +19,8 @@ class ReportController extends Controller
 
     public function index(Request $req)
     {
-        return ReportService::index($req, array('per' => $req->str('per'), 'start' => $req->str('start'), 'end' => $req->str('end'), 'kw' => $req->str('kw')));
+        list($page, $size) = $this->pageArgs($req);
+        return ReportService::index($req, array_merge($this->filterArgs($req), array('per' => $req->str('per'), 'start' => $req->str('start'), 'end' => $req->str('end'))), $page, $size);
     }
 
     public function generate(Request $req)

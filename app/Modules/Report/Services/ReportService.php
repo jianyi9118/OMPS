@@ -338,13 +338,21 @@ class ReportService
      * Own reports. per = all | week | month | year | custom (start / end): a report shows when its
      * period lies completely inside the range; a report without a period counts by its creation date.
      */
-    public static function index(Request $req, array $f)
+    /**
+     * My reports, paged. Filters: a period (from / to, or the older per / start / end) keeps the reports
+     * whose period lies inside it; kw is looked for in the title. total = after filtering, all = before.
+     */
+    public static function index(Request $req, array $f, $page = 1, $size = 30)
     {
         $rows = DB::table('reports')->where('created_by', $req->userId())->whereNull('deleted_at')->orderBy('id', 'DESC')->get();
         $range = null;
         $per = isset($f['per']) ? (string) $f['per'] : 'all';
         $ranges = self::ranges();
-        if (isset($ranges[$per]) && $per !== 'quarter') {
+        $from = isset($f['from']) ? (string) $f['from'] : '';
+        $to = isset($f['to']) ? (string) $f['to'] : '';
+        if ($from !== '' || $to !== '') {
+            $range = array($from !== '' ? $from : '0000-01-01', $to !== '' ? $to : '9999-12-31');
+        } elseif (isset($ranges[$per]) && $per !== 'quarter') {
             $range = $ranges[$per];
         } elseif ($per === 'custom') {
             $s = isset($f['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $f['start']) ? (string) $f['start'] : '0000-01-01';
@@ -369,7 +377,10 @@ class ReportService
         usort($out, function ($a, $b) {
             return $a['updated_at'] === $b['updated_at'] ? $b['id'] - $a['id'] : strcmp($b['updated_at'], $a['updated_at']);
         });
-        return array('rows' => $out, 'total' => count($rows), 'ranges' => $ranges);
+        $page = max(1, (int) $page);
+        $size = min(200, max(1, (int) $size));
+        return array('rows' => array_slice($out, ($page - 1) * $size, $size), 'total' => count($out), 'page' => $page, 'size' => $size, 'all' => count($rows),
+            'ranges' => $ranges);
     }
 
     // ---------- one report ----------

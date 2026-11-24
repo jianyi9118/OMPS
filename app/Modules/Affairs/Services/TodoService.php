@@ -6,7 +6,7 @@ use Omps\Engines\Permission;
 
 /**
  * 待办事项 (design §13.1, §17): everything waiting for the user, read live from the business
- * tables, so an item leaves the list the moment it is handled. Text is built in the browser from
+ * tables, so an item leaves the list the moment it is handled; history() lists what the user handled. Text is built in the browser from
  * kind + params (language key todo.msg.<kind>).
  */
 class TodoService
@@ -140,5 +140,112 @@ class TodoService
         });
         $notesCount = count($notes);
         return array('rows' => $rows, 'urgent' => $urgent, 'counts' => array('todo' => count($rows), 'issues' => $issueCount, 'notes' => $notesCount));
+    }
+
+    /**
+     * 已处理: to-do items I have handled, newest first, read from the same business tables
+     * (who handled what is recorded there). Each row: kind, params, result, at, link.
+     * Paged over several sources: each gives its newest page*size rows, merged and cut.
+     * $f = list filters: the period is on the time I handled the item, the keyword on the
+     * text the row shows (each source names its text columns).
+     */
+    public static function history(array $user, array $f, $page, $size)
+    {
+        $uid = (int) $user['id'];
+        $me = $user['person_id'] === null ? 0 : (int) $user['person_id'];
+        $need = $page * $size;
+        $rows = array();
+        $total = 0;
+        $from = isset($f['from']) ? (string) $f['from'] : '';
+        $to = isset($f['to']) ? (string) $f['to'] : '';
+        $kw = isset($f['kw']) ? trim((string) $f['kw']) : '';
+        $take = function ($sql, array $args, array $text, $fn) use (&$rows, &$total, $need, $from, $to, $kw) {
+            $where = array();
+            if ($from !== '') {
+                $where[] = 'x.at >= ?';
+                $args[] = $from . ' 00:00:00';
+            }
+            if ($to !== '') {
+                $where[] = 'x.at <= ?';
+                $args[] = $to . ' 23:59:59';
+            }
+            if ($kw !== '') {
+                $like = array();
+                foreach ($text as $c) {
+                    // compared as utf8mb4: ascii columns (asset numbers) would refuse a Chinese term
+                    $like[] = 'CONVERT(x.' . $c . ' USING utf8mb4) LIKE ?';
+                    $args[] = '%' . addcslashes($kw, '%_\\') . '%';
+                }
+                $where[] = '(' . implode(' OR ', $like) . ')';
+            }
+            $sql = 'SELECT * FROM (' . $sql . ') x' . ($where ? ' WHERE ' . implode(' AND ', $where) : '');
+            $total += (int) DB::value('SELECT COUNT(*) FROM (' . $sql . ') y', $args);
+            foreach (DB::select($sql . ' ORDER BY at DESC LIMIT ' . (int) $need, $args) as $r) {
+                $rows[] = $fn($r);
+            }
+        };
+        $name = function ($person, $account) {
+            return $person !== null && $person !== '' ? (string) $person : (string) $account;
+        };
+
+        // received items: orders I finished, read-only items I opened
+        $take("SELECT i.id, i.title, i.need_reply, IF(i.need_reply = 1, ir.done_at, ir.read_at) AS at, u.display_name AS sender, sp.name AS sender_person
+            FROM issue_recipients ir JOIN issues i ON i.id = ir.issue_id JOIN users u ON u.id = i.sender_id LEFT JOIN personnel_profiles sp ON sp.id = u.person_id
+            WHERE ir.user_id = ? AND ((i.need_reply = 1 AND ir.done_at IS NOT NULL) OR (i.need_reply = 0 AND ir.read_at IS NOT NULL))", array($uid),
+            array('title', 'sender', 'sender_person'), function ($r) use ($name) {
+            $order = (int) $r['need_reply'] === 1;
+            return array('kind' => $order ? 'issue_order' : 'issue_read', 'params' => array('title' => (string) $r['title'], 'sender' => $name($r['sender_person'], $r['sender'])),
+                'result' => $order ? 'done' : 'read', 'at' => (string) $r['at'], 'link' => '/affairs/issues?id=' . (int) $r['id']);
+        });
+
+        // notes submitted to me that I read
+        $take("SELECT n.id, n.title, n.read_at AS at, u.display_name AS owner, op.name AS owner_person FROM notes n JOIN users u ON u.id = n.owner_id
+            LEFT JOIN personnel_profiles op ON op.id = u.person_id WHERE n.submitted_to = ? AND n.status = 'read' AND n.read_at IS NOT NULL", array($uid),
+            array('title', 'owner', 'owner_person'), function ($r) use ($name) {
+            return array('kind' => 'note_read', 'params' => array('title' => (string) $r['title'], 'name' => $name($r['owner_person'], $r['owner'])),
+                'result' => 'read', 'at' => (string) $r['at'], 'link' => '/affairs/notes?tab=inbox&id=' . (int) $r['id']);
+        });
+
+        // results I reviewed (a resubmitted result waits again and leaves the history), never my own
+        $take("SELECT r.id, r.status, r.reviewed_at AS at, p.title, pp.name FROM performance_reports r JOIN plans p ON p.id = r.plan_id
+            JOIN personnel_profiles pp ON pp.id = r.person_id WHERE r.reviewed_by = ? AND r.status IN ('approved', 'returned') AND r.person_id <> ? AND r.reviewed_at IS NOT NULL",
+            array($uid, $me), array('title', 'name'), function ($r) {
+            return array('kind' => 'perf_review', 'params' => array('name' => (string) $r['name'], 'title' => (string) $r['title']),
+                'result' => (string) $r['status'], 'at' => (string) $r['at'], 'link' => '/performance/review?focus=' . (int) $r['id']);
+        });
+
+        // profile changes I reviewed
+        $take("SELECT c.id, c.status, c.reviewed_at AS at, p.name FROM profile_change_requests c JOIN personnel_profiles p ON p.id = c.person_id
+            WHERE c.reviewed_by = ? AND c.status IN ('approved', 'returned') AND c.person_id <> ? AND c.reviewed_at IS NOT NULL", array($uid, $me), array('name'), function ($r) {
+            return array('kind' => 'change_review', 'params' => array('name' => (string) $r['name']), 'result' => (string) $r['status'], 'at' => (string) $r['at'],
+                'link' => '/org/staff?tab=review');
+        });
+
+        if (class_exists('Omps\\Modules\\Device\\Services\\DeviceService') && DB::select("SHOW TABLES LIKE 'device_faults'")) {
+            $fault = function ($kind, $result) {
+                return function ($r) use ($kind, $result) {
+                    return array('kind' => $kind, 'params' => array('asset' => (string) $r['asset_no'], 'device' => (string) $r['name']),
+                        'result' => $result === null ? (string) $r['status'] : $result, 'at' => (string) $r['at'], 'link' => '/device/repair?id=' . (int) $r['id']);
+                };
+            };
+            // repairs I assigned, requests I cancelled, repairs I finished
+            $take("SELECT f.id, f.status, r.started_at AS at, d.asset_no, d.name FROM device_repairs r JOIN device_faults f ON f.id = r.fault_id JOIN devices d ON d.id = f.device_id
+                WHERE r.created_by = ?", array($uid), array('asset_no', 'name'), $fault('device_fault', 'assigned'));
+            $take("SELECT f.id, f.status, f.closed_at AS at, d.asset_no, d.name FROM device_faults f JOIN devices d ON d.id = f.device_id
+                WHERE f.closed_by = ? AND f.status = 'cancelled'", array($uid), array('asset_no', 'name'), $fault('device_fault', null));
+            $take("SELECT f.id, f.status, f.closed_at AS at, d.asset_no, d.name FROM device_faults f JOIN devices d ON d.id = f.device_id
+                WHERE f.closed_by = ? AND f.status = 'fixed'", array($uid), array('asset_no', 'name'), $fault('device_repair', null));
+            // hardware changes I confirmed or ignored
+            $take("SELECT a.id, a.status, a.handled_at AS at, d.asset_no, d.name FROM device_anomalies a JOIN devices d ON d.id = a.device_id
+                WHERE a.handled_by = ? AND a.status IN ('confirmed', 'ignored') AND a.handled_at IS NOT NULL", array($uid), array('asset_no', 'name'), function ($r) {
+                return array('kind' => 'device_anomaly', 'params' => array('asset' => (string) $r['asset_no'], 'device' => (string) $r['name']),
+                    'result' => (string) $r['status'], 'at' => (string) $r['at'], 'link' => '/device/monitor?tab=anomaly&id=' . (int) $r['id']);
+            });
+        }
+
+        usort($rows, function ($a, $b) {
+            return strcmp($b['at'], $a['at']);
+        });
+        return array('rows' => array_slice($rows, ($page - 1) * $size, $size), 'total' => $total, 'page' => $page, 'size' => $size);
     }
 }

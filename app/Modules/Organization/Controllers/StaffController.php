@@ -22,7 +22,7 @@ class StaffController extends Controller
     public function index(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return StaffService::search($req, array('kw' => $req->str('kw'), 'dept_id' => $req->int('dept_id'), 'status' => $req->str('status'), 'unassigned' => $req->int('unassigned')), $page, $size);
+        return StaffService::search($req, array_merge($this->filterArgs($req), array('dept_id' => $req->int('dept_id'), 'status' => $req->str('status'), 'unassigned' => $req->int('unassigned'))), $page, $size);
     }
 
     public function show(Request $req)
@@ -77,6 +77,6 @@ class StaffController extends Controller
     public function transfers(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return StaffService::transfers($req, array('type' => $req->str('type'), 'kw' => $req->str('kw')), $page, $size);
+        return StaffService::transfers($req, array_merge($this->filterArgs($req), array('type' => $req->str('type'))), $page, $size);
     }
 }

@@ -4,8 +4,9 @@
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
   var meta = null;
-  var state = { tab: O.qs("tab") === "sent" ? "sent" : "in", filter: "pending", page: 1, spage: 1, sfilter: "all" };
-  var list = [], curId = 0, focusId = +O.qs("id") || 0;
+  var state = { tab: O.qs("tab") === "sent" ? "sent" : "in", filter: "pending", page: 1 };
+  var sstate = { filter: "all", page: 1 };
+  var list = [], lastRes = null, curId = 0, focusId = +O.qs("id") || 0;
   var replyFiles = [];
 
   var KIND_PILL = { tip: "", doc: "", order: "warn" };
@@ -56,34 +57,47 @@
   /* ---------- received ---------- */
   function inView() {
     var body = document.getElementById("is_body");
-    body.innerHTML = '<div class="nb"><div class="card nbl" id="ii_l"></div><div class="card" id="ii_r"><div class="card-b muted">' + O.esc(t("issue.pick")) + "</div></div></div>";
-    document.getElementById("ii_l").addEventListener("click", function (e) {
+    body.innerHTML = '<div class="nb"><div class="card nbl" id="ii_l"><div class="bar"><b style="flex:1">' + O.esc(t("issue.tab.in")) + '</b><div class="chips">' +
+      [["pending", t("issue.f.pending")], ["all", t("issue.f.all")]].map(function (c) { return '<button type="button" class="chip" data-f="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") +
+      '</div></div><div id="ii_ls"></div></div><div class="card" id="ii_r"><div class="card-b muted">' + O.esc(t("issue.pick")) + "</div></div></div>";
+    var l = document.getElementById("ii_l");
+    l.querySelector(".bar").appendChild(O.filters({ state: state, onChange: loadIn, compact: true, period: t("issue.col.at"),
+      fields: [["title", t("issue.field.title")], ["body", t("issue.field.body")], ["sender", t("issue.col.sender")]], placeholder: t("issue.search") }));
+    l.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
       if (b.hasAttribute("data-f")) { state.filter = b.getAttribute("data-f"); state.page = 1; loadIn(); }
       if (b.hasAttribute("data-id")) openIn(+b.getAttribute("data-id"));
-      if (b.hasAttribute("data-p")) { state.page = +b.getAttribute("data-p"); loadIn(); }
     });
     loadIn();
   }
 
   function drawInList(res) {
-    var l = document.getElementById("ii_l");
+    var l = document.getElementById("ii_ls");
     if (!l) return;
-    l.innerHTML = '<div class="bar"><b style="flex:1">' + O.esc(t("issue.tab.in")) + '</b><div class="chips">' + [["pending", t("issue.f.pending")], ["all", t("issue.f.all")]].map(function (c) {
-      return '<button type="button" class="chip' + (state.filter === c[0] ? " on" : "") + '" data-f="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + "</div></div>" +
-      '<div class="nbls">' + (list.length ? list.map(function (x) {
+    var cs = document.querySelectorAll("#ii_l [data-f]");
+    for (var i = 0; i < cs.length; i++) cs[i].classList.toggle("on", cs[i].getAttribute("data-f") === state.filter);
+    var filtered = state.kw || state.from || state.to;
+    l.innerHTML = '<div class="nbls">' + (list.length ? list.map(function (x) {
         var sub = t("issue.kind." + x.kind) + " · " + x.sender + " · " + (x.need_reply && x.due ? (x.done ? t("issue.due_at", { due: x.due }) : O.left(x.due)) : x.at.slice(5, 16));
         return '<button type="button" class="nbi' + (x.status === "withdrawn" ? " off" : "") + (curId === x.id ? " on" : "") + '" data-id="' + x.id + '"><div class="nbi-h"><b>' +
           (!x.read && x.status === "active" ? '<span class="udot"></span>' : "") + O.esc(x.title) + "</b>" + statePill(x) + '</div><div class="nbi-s"><span class="' + (x.overdue ? "bad" : "") + '">' + O.esc(sub) + "</span></div></button>";
-      }).join("") : '<div class="card-b muted">' + O.esc(t(state.filter === "pending" ? "issue.in_empty" : "issue.in_none")) + "</div>") + "</div>" +
-      (res.total > res.size ? '<div class="pager">' + (res.page > 1 ? '<button type="button" data-p="' + (res.page - 1) + '">‹</button>' : "") + O.esc(res.page + " / " + Math.ceil(res.total / res.size)) +
-        (res.page * res.size < res.total ? '<button type="button" data-p="' + (res.page + 1) + '">›</button>' : "") + "</div>" : "");
+      }).join("") : '<div class="card-b muted">' + O.esc(t(filtered ? "issue.none_found" : state.filter === "pending" ? "issue.in_empty" : "issue.in_none")) + "</div>") + "</div>";
+    l.appendChild(O.pager(res, function (p) { state.page = p; loadIn(); }));
+  }
+
+  function inQuery(filter, page) {
+    var q = O.filterQuery(state);
+    q.box = "in";
+    q.filter = filter;
+    q.page = page;
+    return q;
   }
 
   function loadIn() {
-    return O.api("GET", "/api/v1/issues", null, { box: "in", filter: state.filter, page: state.page }).then(function (res) {
+    return O.api("GET", "/api/v1/issues", null, inQuery(state.filter, state.page)).then(function (res) {
       list = res.rows;
+      lastRes = res;
       drawInList(res);
       // opening an item marks it read, so nothing is opened without a click (or a jump link)
       if (focusId) { var f = focusId; openIn(f); }
@@ -132,10 +146,11 @@
         if (focusId === x.id && !item && state.filter === "pending") {
           // the item is finished or withdrawn: show the full list so it can be highlighted
           state.filter = "all";
-          O.api("GET", "/api/v1/issues", null, { box: "in", filter: "all", page: 1 }).then(function (res) { list = res.rows; item = list.filter(function (y) { return y.id === x.id; })[0]; after(); }, O.failed);
+          state.page = 1;
+          O.api("GET", "/api/v1/issues", null, inQuery("all", 1)).then(function (res) { list = res.rows; lastRes = res; item = list.filter(function (y) { return y.id === x.id; })[0]; after(); }, O.failed);
           return;
         }
-        drawInList({ total: list.length, size: 999, page: 1 });
+        if (lastRes) drawInList(lastRes);
         if (focusId === x.id) {
           focusId = 0;
           O.focusBar(t("issue.located", { title: x.title }));
@@ -154,12 +169,15 @@
   function sentView() {
     var body = document.getElementById("is_body");
     body.innerHTML = '<div class="bar"><div class="chips">' + [["all", t("issue.f.all")], ["pending", t("issue.f.active")]].map(function (c) {
-      return '<button type="button" class="chip' + (state.sfilter === c[0] ? " on" : "") + '" data-sf="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") +
+      return '<button type="button" class="chip' + (sstate.filter === c[0] ? " on" : "") + '" data-sf="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") +
       '</div><span class="sp"></span><button type="button" class="btn pri" id="is_new">' + O.icon("plus", 14) + " " + O.esc(t("issue.new")) + '</button></div><div class="card" id="is_card"></div>';
-    body.querySelector(".bar").addEventListener("click", function (e) {
+    var bar = body.querySelector(".bar");
+    bar.insertBefore(O.filters({ state: sstate, onChange: loadSent, period: t("issue.col.at"), fields: [["title", t("issue.field.title")], ["body", t("issue.field.body")]],
+      placeholder: t("issue.search") }), bar.querySelector(".sp"));
+    bar.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
-      if (b.hasAttribute("data-sf")) { state.sfilter = b.getAttribute("data-sf"); state.spage = 1; sentView(); }
+      if (b.hasAttribute("data-sf")) { sstate.filter = b.getAttribute("data-sf"); sstate.page = 1; sentView(); }
       if (b.id === "is_new") sendForm();
     });
     loadSent();
@@ -172,7 +190,11 @@
   }
 
   function loadSent() {
-    O.api("GET", "/api/v1/issues", null, { box: "sent", filter: state.sfilter, page: state.spage }).then(function (res) {
+    var q = O.filterQuery(sstate);
+    q.box = "sent";
+    q.filter = sstate.filter;
+    q.page = sstate.page;
+    O.api("GET", "/api/v1/issues", null, q).then(function (res) {
       var card = document.getElementById("is_card");
       if (!card) return;
       card.innerHTML = "";
@@ -184,7 +206,7 @@
           { t: t("issue.col.overdue"), cls: "num", f: function (x) { return x.overdue ? '<b style="color:var(--bad)">' + x.overdue + "</b>" : '<span class="muted">0</span>'; } },
           { t: t("issue.col.at"), f: function (x) { return '<span class="mono">' + O.esc(x.at.slice(0, 16)) + "</span>"; } }
         ],
-        rows: res.rows, empty: t("issue.sent_empty"),
+        rows: res.rows, empty: t(sstate.kw || sstate.from || sstate.to ? "issue.none_found" : "issue.sent_empty"),
         acts: function (x) {
           var open = x.status === "active" && (x.need_reply ? x.done < x.n : x.read < x.n);
           return [
@@ -194,7 +216,7 @@
           ];
         }, slots: 3
       }));
-      card.appendChild(O.pager(res, function (p) { state.spage = p; loadSent(); }));
+      card.appendChild(O.pager(res, function (p) { sstate.page = p; loadSent(); }));
       card.insertAdjacentHTML("beforeend", O.legend([["eye", t("issue.view")], ["bell", t("issue.nudge")], ["undo", t("issue.withdraw")]]));
       if (focusId) { var f = focusId; focusId = 0; detail(f, true); }
     }, O.failed);
@@ -311,7 +333,8 @@
       return O.upload("/api/v1/issues", files, fields).then(function (r) {
         O.status(t("issue.sent", { kind: t("issue.kind." + r.kind) }));
         state.tab = "sent";
-        state.sfilter = "all";
+        sstate.filter = "all";
+        sstate.page = 1;
         render();
       }, function (e) {
         if (e && e.fields) {

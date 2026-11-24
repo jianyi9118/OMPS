@@ -7,8 +7,10 @@
   var LEVEL = { info: "", warn: "warn", urgent: "bad" };
 
   function shell() {
-    view.innerHTML = '<div class="bar" id="nt_bar"></div><div class="card" id="nt_card"></div>';
-    document.getElementById("nt_bar").addEventListener("click", function (e) {
+    view.innerHTML = '<div class="bar" id="nt_bar"><span id="nt_tabs" style="display:contents"></span><span class="sp"></span><span id="nt_acts" style="display:contents"></span></div><div class="card" id="nt_card"></div>';
+    var bar = document.getElementById("nt_bar");
+    bar.insertBefore(O.filters({ state: state, onChange: load, period: t("notify.col.at"), placeholder: t("notify.search") }), bar.querySelector(".sp"));
+    bar.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
       if (b.hasAttribute("data-tab")) { state.tab = b.getAttribute("data-tab"); state.page = 1; load(); }
@@ -17,13 +19,13 @@
   }
 
   function render(res) {
-    document.getElementById("nt_bar").innerHTML =
+    document.getElementById("nt_tabs").innerHTML =
       '<button type="button" class="btn' + (state.tab === "unread" ? " pri" : "") + '" data-tab="unread">' + O.esc(t("notify.tab_unread", { n: res.unread })) + "</button>" +
-      '<button type="button" class="btn' + (state.tab === "all" ? " pri" : "") + '" data-tab="all">' + O.esc(t("notify.tab_all")) + '</button><span class="sp"></span>' +
-      (res.unread ? '<button type="button" class="btn" id="nt_all">' + O.icon("check", 14) + " " + O.esc(t("notify.read_all")) + "</button>" : "");
+      '<button type="button" class="btn' + (state.tab === "all" ? " pri" : "") + '" data-tab="all">' + O.esc(t("notify.tab_all")) + "</button>";
+    document.getElementById("nt_acts").innerHTML = res.unread ? '<button type="button" class="btn" id="nt_all">' + O.icon("check", 14) + " " + O.esc(t("notify.read_all")) + "</button>" : "";
     var card = document.getElementById("nt_card");
     if (!res.rows.length) {
-      card.innerHTML = '<div class="card-b muted">' + O.esc(t(state.tab === "unread" ? "notify.empty_unread" : "notify.none")) + "</div>";
+      card.innerHTML = '<div class="card-b muted">' + O.esc(t(state.kw || state.from || state.to ? "notify.none_found" : state.tab === "unread" ? "notify.empty_unread" : "notify.none")) + "</div>";
       return;
     }
     card.innerHTML = '<ul class="list nlist">' + res.rows.map(function (n, i) {
@@ -41,7 +43,10 @@
   }
 
   function load() {
-    O.api("GET", "/api/v1/notifications", null, { tab: state.tab, page: state.page }).then(render, O.failed);
+    var q = O.filterQuery(state);
+    q.tab = state.tab;
+    q.page = state.page;
+    O.api("GET", "/api/v1/notifications", null, q).then(render, O.failed);
   }
 
   shell();

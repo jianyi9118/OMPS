@@ -7,7 +7,7 @@
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
   var META = null;
-  var st = { tab: "list", per: "all", start: "", end: "", kw: "" };
+  var st = { tab: "list", page: 1 };
   var gen = { start: "", end: "", quick: "year", allTasks: true, tasks: {}, allPeople: true, people: {} };
 
   function tabs() {
@@ -24,33 +24,30 @@
 
   /* ---------- list ---------- */
   function listPage() {
-    var chips = [["all", "report.per.all"], ["week", "plan.per.week"], ["month", "plan.per.month"], ["year", "plan.per.year"], ["custom", "report.per.custom"]];
-    view.innerHTML = tabs() + '<div class="bar" id="rl_bar">' + chips.map(function (c) { return '<button type="button" class="btn' + (st.per === c[0] ? " pri" : "") + '" data-per="' + c[0] + '">' + O.esc(t(c[1])) + "</button>"; }).join("") +
-      (st.per === "custom" ? O.dateInput("rl_s", st.start) + '<span class="muted">—</span>' + O.dateInput("rl_e", st.end) : "") +
-      '<input type="search" id="rl_kw" placeholder="' + O.esc(t("report.search")) + '" value="' + O.esc(st.kw) + '"><span class="muted" id="rl_count"></span><span class="sp"></span>' +
+    view.innerHTML = tabs() + '<div class="bar" id="rl_bar"><span class="muted" id="rl_count"></span><span class="sp"></span>' +
       '<button type="button" class="btn" id="rl_gen">' + O.esc(t("report.tab.gen")) + '</button><button type="button" class="btn pri" id="rl_new">' + O.icon("plus", 14) + " " + O.esc(t("report.new_manual")) + "</button></div>" +
       '<div class="card" id="rl_card"></div>';
     bindTabs();
     var bar = document.getElementById("rl_bar");
+    // the period keeps the reports whose own period lies inside it
+    bar.insertBefore(O.filters({ state: st, onChange: loadList, period: t("report.col.period"), placeholder: t("report.search") }), bar.firstChild);
     bar.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
-      if (b.hasAttribute("data-per")) { st.per = b.getAttribute("data-per"); listPage(); }
       if (b.id === "rl_gen") { st.tab = "gen"; route(); }
       if (b.id === "rl_new") manualForm(null);
     });
-    bar.addEventListener("change", function (e) {
-      if (e.target.id === "rl_s") { st.start = e.target.value; loadList(); }
-      if (e.target.id === "rl_e") { st.end = e.target.value; loadList(); }
-    });
-    document.getElementById("rl_kw").addEventListener("input", O.debounce(function (e) { st.kw = e.target.value.trim(); loadList(); }, 350));
     loadList();
   }
 
   function loadList() {
-    O.api("GET", "/api/v1/reports", null, { per: st.per, start: st.start, end: st.end, kw: st.kw }).then(function (res) {
-      var filtered = st.per !== "all" || st.kw;
-      document.getElementById("rl_count").textContent = filtered ? t("report.count_filtered", { n: res.rows.length, total: res.total }) : t("report.count", { n: res.total });
+    var q = O.filterQuery(st);
+    q.page = st.page;
+    O.api("GET", "/api/v1/reports", null, q).then(function (res) {
+      var filtered = st.from || st.to || st.kw;
+      var cnt = document.getElementById("rl_count");
+      if (!cnt) return;
+      cnt.textContent = filtered ? t("report.count_filtered", { n: res.total, total: res.all }) : t("report.count", { n: res.all });
       var card = document.getElementById("rl_card");
       card.innerHTML = "";
       card.appendChild(O.table({
@@ -72,13 +69,14 @@
           ];
         }, slots: 4
       }));
-      if (filtered && !res.rows.length && res.total) card.insertAdjacentHTML("beforeend", '<div class="card-b"><button type="button" class="btn" id="rl_all">' + O.esc(t("report.show_all")) + "</button></div>");
+      card.appendChild(O.pager(res, function (p) { st.page = p; loadList(); }));
+      if (filtered && !res.rows.length && res.all) card.insertAdjacentHTML("beforeend", '<div class="card-b"><button type="button" class="btn" id="rl_all">' + O.esc(t("report.show_all")) + "</button></div>");
       card.insertAdjacentHTML("beforeend", O.legend([["eye", t("report.preview")], ["upload", t("report.upload")], ["edit", t("common.edit")], ["trash", t("common.delete")]]) +
         '<div class="card-b muted" style="font-size:12.5px;padding-top:0">' + O.esc(t("report.list_hint")) + "</div>");
       card.onclick = function (e) {
         var op = e.target.closest ? e.target.closest("[data-open]") : null;
         if (op) preview(+op.getAttribute("data-open"));
-        if (e.target.id === "rl_all") { st.per = "all"; st.kw = ""; listPage(); }
+        if (e.target.id === "rl_all") { st.period = "all"; st.from = ""; st.to = ""; st.kw = ""; st.page = 1; listPage(); }
       };
     }, O.failed);
   }

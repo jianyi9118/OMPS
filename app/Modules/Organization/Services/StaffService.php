@@ -50,6 +50,27 @@ class StaffService
             ->select(array('p.id', 'p.staff_no', 'p.name', 'p.gender', 'p.dept_id', 'p.position', 'p.phone', 'p.hire_date', 'p.status', 'p.unassigned', 'p.version', 'p.id_number_mask', 'd.name as dept_name'));
     }
 
+    /** Keyword fields of the staff list (the browser offers the same keys); ID numbers are encrypted and never searched. */
+    const SEARCH = array('staff_no' => 'p.staff_no', 'name' => 'p.name', 'dept' => 'd.name', 'position' => 'p.position', 'phone' => 'p.phone');
+
+    /**
+     * List filters on a staff query (p = personnel_profiles, d = departments): period on the hire date,
+     * keyword in one field, or in all of them plus the searchable custom fields.
+     */
+    public static function filter($q, array $f)
+    {
+        $q->wherePeriod('p.hire_date', isset($f['from']) ? $f['from'] : '', isset($f['to']) ? $f['to'] : '');
+        $kw = isset($f['kw']) ? (string) $f['kw'] : '';
+        $field = isset($f['field']) ? (string) $f['field'] : '';
+        if ($kw === '') {
+            return $q;
+        }
+        if ($field !== '' && isset(self::SEARCH[$field])) {
+            return $q->whereKeyword(self::SEARCH, $kw, $field);
+        }
+        return $q->whereLikeAnyOrIn(array_values(self::SEARCH), $kw, 'p.id', \Omps\Engines\CustomFields::matchIds('personnel', $kw));
+    }
+
     public static function search(Request $req, array $f, $page, $size)
     {
         $q = self::base();
@@ -65,9 +86,7 @@ class StaffService
             }
             $q->whereIn('p.dept_id', $want);
         }
-        if (isset($f['kw']) && $f['kw'] !== '') {
-            $q->whereLikeAnyOrIn(array('p.name', 'p.staff_no', 'p.position'), $f['kw'], 'p.id', \Omps\Engines\CustomFields::matchIds('personnel', $f['kw']));
-        }
+        self::filter($q, $f);
         if (isset($f['status']) && in_array($f['status'], array('active', 'disabled', 'left', 'retired'), true)) {
             $q->where('p.status', $f['status']);
         }
@@ -347,7 +366,10 @@ class StaffService
             'by' => isset($r['by_name']) ? str_or_empty($r['by_name']) : '');
     }
 
-    /** Assignment records the user may see (department scope: involving their departments). */
+    /** Keyword fields of the transfer records. */
+    const TRANSFER_SEARCH = array('name' => 'p.name', 'from_dept' => 'f.name', 'to_dept' => 'd.name', 'position' => 'a.position', 'by' => 'u.display_name', 'note' => 'a.note');
+
+    /** Assignment records the user may see (department scope: involving their departments); $f also has the list filters (period on the effective date). */
     public static function transfers(Request $req, array $f, $page, $size)
     {
         $q = DB::table('personnel_assignments a')->join('personnel_profiles p', 'p.id', '=', 'a.person_id')
@@ -369,9 +391,7 @@ class StaffService
         if (isset($f['type']) && $f['type'] !== '') {
             $q->where('a.change_type', $f['type']);
         }
-        if (isset($f['kw']) && $f['kw'] !== '') {
-            $q->whereLikeAny(array('p.name'), $f['kw']);
-        }
+        $q->whereFilters($f, 'a.start_date', self::TRANSFER_SEARCH);
         $res = $q->orderBy('a.start_date', 'DESC')->orderBy('a.id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentAssignment'), $res['rows']);
         return $res;

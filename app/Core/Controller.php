@@ -35,8 +35,18 @@ abstract class Controller
     }
 
     /** Pagination parameters from the query string. */
+    /** [page, size]: 30 a page unless the viewer chose 10 to 100. */
     protected function pageArgs(Request $req)
     {
-        return array(max(1, $req->int('page', 1)), min(100, max(5, $req->int('size', 20))));
+        return array(max(1, $req->int('page', 1)), min(100, max(5, $req->int('size', 30))));
+    }
+
+    /** List filters from the query: ['from', 'to', 'kw', 'field']; dates that are not Y-m-d are ignored. */
+    protected function filterArgs(Request $req)
+    {
+        $d = function ($v) {
+            return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : '';
+        };
+        return array('from' => $d($req->str('from')), 'to' => $d($req->str('to')), 'kw' => $req->str('kw'), 'field' => $req->str('field'));
     }
 }

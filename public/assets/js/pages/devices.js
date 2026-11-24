@@ -3,7 +3,7 @@
   "use strict";
   var O = window.OMPS, t = O.t, D = O.device;
   var view = document.getElementById("view");
-  var state = { tab: "list", kw: "", category: "", status: "", dept_id: "", page: 1 };
+  var state = { tab: "list", category: "", status: "", dept_id: "", page: 1 };
   var M = null;
 
   function shell() {
@@ -26,25 +26,38 @@
 
   function listView() {
     var body = document.getElementById("dv_body");
-    body.innerHTML = '<div class="bar"><input type="search" id="dv_kw" placeholder="' + O.esc(t("device.search")) + '" value="' + O.esc(state.kw) + '">' +
-      '<select id="dv_cat"><option value="">' + O.esc(t("device.all_categories")) + "</option>" + M.categories.map(function (c) { return '<option value="' + c + '"' + (c === state.category ? " selected" : "") + ">" + O.esc(D.cat(c)) + "</option>"; }).join("") + "</select>" +
+    body.innerHTML = '<div class="bar"><select id="dv_cat"><option value="">' + O.esc(t("device.all_categories")) + "</option>" + M.categories.map(function (c) { return '<option value="' + c + '"' + (c === state.category ? " selected" : "") + ">" + O.esc(D.cat(c)) + "</option>"; }).join("") + "</select>" +
       '<select id="dv_status"><option value="">' + O.esc(t("device.all_statuses")) + "</option>" + M.statuses.map(function (s) { return '<option value="' + s + '"' + (s === state.status ? " selected" : "") + ">" + O.esc(t("device.status." + s)) + "</option>"; }).join("") + "</select>" +
       '<select id="dv_dept"><option value="">' + O.esc(t("staff.all_depts")) + "</option>" + O.deptOpts(M.depts).map(function (o) { return '<option value="' + o[0] + '"' + (String(o[0]) === String(state.dept_id) ? " selected" : "") + ">" + O.esc(o[1]) + "</option>"; }).join("") + "</select>" +
       '<span class="sp"></span>' + (M.caps.export ? '<button type="button" class="btn" id="dv_export">' + O.icon("download", 14) + " " + O.esc(t("device.export")) + "</button>" : "") +
       (M.caps.add ? '<button type="button" class="btn pri" id="dv_add">' + O.icon("plus", 14) + " " + O.esc(t("device.add")) + "</button>" : "") + '</div><div class="card" id="dv_card"></div>';
-    document.getElementById("dv_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; load(); }, 350));
+    var bar = body.querySelector(".bar");
+    bar.insertBefore(O.filters({ state: state, onChange: load, period: t("device.field.purchase_date"), placeholder: t("device.search"), fields: [["asset_no", t("device.field.asset_no")],
+      ["name", t("device.field.name")], ["model", t("device.f_model")], ["serial_no", t("device.field.serial_no")], ["holder", t("device.field.holder")], ["dept", t("device.field.dept")],
+      ["location", t("device.field.location")], ["remark", t("device.field.remark")]] }), bar.querySelector(".sp"));
     ["dv_cat", "dv_status", "dv_dept"].forEach(function (id, i) {
       document.getElementById(id).addEventListener("change", function (e) { state[["category", "status", "dept_id"][i]] = e.target.value; state.page = 1; load(); });
     });
     var ex = document.getElementById("dv_export");
-    if (ex) ex.addEventListener("click", function () { window.location.href = O.url("/api/v1/device-export", { kw: state.kw, category: state.category, status: state.status, dept_id: state.dept_id }); });
+    if (ex) ex.addEventListener("click", function () { window.location.href = O.url("/api/v1/device-export", query()); });
     var add = document.getElementById("dv_add");
     if (add) add.addEventListener("click", function () { D.form(null, function (id) { load(); D.detail(id, { onChange: load }); }); });
     load();
   }
 
+  /** The list filters (the export follows them too). */
+  function query() {
+    var q = O.filterQuery(state);
+    q.category = state.category;
+    q.status = state.status;
+    q.dept_id = state.dept_id;
+    return q;
+  }
+
   function load() {
-    O.api("GET", "/api/v1/devices", null, { kw: state.kw, category: state.category, status: state.status, dept_id: state.dept_id, page: state.page }).then(function (res) {
+    var q = query();
+    q.page = state.page;
+    O.api("GET", "/api/v1/devices", null, q).then(function (res) {
       var card = document.getElementById("dv_card");
       if (!card) return;
       card.innerHTML = "";

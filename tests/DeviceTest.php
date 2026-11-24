@@ -3,6 +3,7 @@ namespace Omps\Tests;
 
 use Omps\Database\DB;
 use Omps\Modules\Affairs\Services\Scheduler;
+use Omps\Modules\Device\Services\CollectorService;
 
 /**
  * Phase 6: devices. Records and scope, holders, parts with history, licences and their reminder,
@@ -184,6 +185,32 @@ class DeviceTest extends TestCase
         $this->same('normal', (string) DB::value('SELECT run_status FROM devices WHERE id = ?', array($id)));
         $this->same(1, $this->notes($f['uChen']['id'], 'device_fault_cancelled', 'device_fault', $fid2));
 
+        // the reporter opens the request from the notification: 故障与维修 shows only their own requests
+        $link = (string) DB::value("SELECT link FROM notifications WHERE user_id = ? AND type = 'device_fault_cancelled' AND biz_id = ?", array($f['uChen']['id'], $fid2));
+        $this->same('/device/repair?id=' . $fid2, $link);
+        $this->login($f['uChen']['username']);
+        $this->status(200, $this->request('GET', '/device/repair'));
+        $mine = $this->data($this->request('GET', '/api/v1/device-faults', null, array('status' => '')));
+        $this->same(array($fid2), array_column($mine['rows'], 'id'), 'only the requests I reported');
+        $this->same(array(), $mine['repairers']);
+        $seen = $this->data($this->request('GET', '/api/v1/device-faults/' . $fid2));
+        $this->same(array('cancelled', '赵磊', array()), array($seen['status'], $seen['closed_by'], $seen['parts']));
+        $this->status(404, $this->request('GET', '/api/v1/device-faults/' . $fid), "someone else's request");
+        $this->status(403, $this->request('POST', '/api/v1/device-faults/' . $fid2 . '/cancel', array('reason' => 'x')));
+        $this->status(403, $this->request('GET', '/api/v1/device-repairs'));
+
+        // the device admin finds what they handled under 已处理
+        $this->login($f['uAdmin']['username']);
+        $h = $this->data($this->request('GET', '/api/v1/todo/history'));
+        $done = array();
+        foreach ($h['rows'] as $r) {
+            $done[] = $r['kind'] . '|' . $r['result'] . '|' . $r['link'];
+        }
+        $this->ok(in_array('device_fault|cancelled|/device/repair?id=' . $fid2, $done, true), 'cancelled');
+        $this->ok(in_array('device_fault|assigned|/device/repair?id=' . $fid, $done, true), 'assigned');
+        $this->ok(in_array('device_repair|fixed|/device/repair?id=' . $fid, $done, true), 'fixed');
+        $this->ok($h['total'] >= 3);
+
         // removing 王晓 from the department: the dialog says one device is still with him
         $this->login($f['uLead']['username']);
         $this->same(1, $this->data($this->request('GET', '/api/v1/staff/' . $f['wang'] . '/remove-impact'))['devices']);
@@ -283,6 +310,65 @@ class DeviceTest extends TestCase
         $this->login($f['uAdmin']['username']);
         $this->status(200, $this->request('GET', '/api/v1/collector-client/omps-collector.ps1'));
         $this->status(404, $this->request('GET', '/api/v1/collector-client/..%2F.env'));
+    }
+
+    public function testKeyboardAndMouse()
+    {
+        $f = $this->f;
+        $this->ok(!in_array('keyboard', CollectorService::DEFAULT_ITEMS, true) && !in_array('mouse', CollectorService::DEFAULT_ITEMS, true), 'keyboard and mouse are opt-in');
+        $this->login($f['uAdmin']['username']);
+        $id = $this->device(11);
+        $code = $this->data($this->request('POST', '/api/v1/devices/' . $id . '/collector-code'))['code'];
+        $this->cookies = array();
+        $token = $this->data($this->request('POST', '/api/v1/collector/register', array('code' => $code, 'computer_name' => 'PC-0011', 'version' => '1.0')))['token'];
+        $hw = array('computer_name' => 'PC-0011', 'cpu' => array(array('model' => 'i5-8500', 'serial_no' => 'C11', 'spec' => '6 cores')));
+        $this->status(200, $this->report($token, $hw, 'boot'));
+        $base = array('computer_name', 'os', 'cpu', 'memory', 'disk', 'board', 'monitor', 'nic');
+        $this->login($f['uAdmin']['username']);
+        $this->status(200, $this->request('PUT', '/api/v1/collect-scope', array('items' => array_merge($base, array('keyboard', 'mouse')))));
+        $parts = function ($type) use ($id) {
+            return DB::table('device_components')->where('device_id', $id)->where('ctype', $type)->whereNull('removed_on')->get();
+        };
+        $anomalies = function () use ($id) {
+            return (int) DB::value('SELECT COUNT(*) FROM device_anomalies WHERE device_id = ?', array($id));
+        };
+        try {
+            // a client from before 1.1 sends no keyboard or mouse: nothing is missing, and the list asks for an update
+            $this->same(false, $this->data($this->report($token, $hw))['changed']);
+            $this->same(0, count($parts('keyboard')));
+            $rows = $this->data($this->request('GET', '/api/v1/device-collectors', null, array('status' => 'active', 'page' => 1)))['rows'];
+            $mine = array_values(array_filter($rows, function ($r) use ($id) { return $r['device_id'] === $id; }));
+            $this->same(true, $mine[0]['outdated'], 'version 1.0 needs an update');
+
+            // the updated client: the keyboard and mouse found become parts without an anomaly
+            $hw['keyboard'] = array(array('model' => 'USB Keyboard', 'serial_no' => null, 'spec' => 'USB 1C4F:0002'));
+            $hw['mouse'] = array(array('model' => 'MX Master 3', 'serial_no' => 'D4:F5:47:0E:1A:2B', 'spec' => 'Bluetooth 046D:B023'));
+            $this->same(true, $this->data($this->report($token, $hw))['changed']);
+            $this->same(array(1, 1, 0), array(count($parts('keyboard')), count($parts('mouse')), $anomalies()), 'registered as found');
+            $this->same('USB 1C4F:0002', (string) $parts('keyboard')[0]['spec']);
+            $this->same('D4:F5:47:0E:1A:2B', (string) $parts('mouse')[0]['serial_no']);
+
+            // a keyboard of another model: an anomaly
+            $hw['keyboard'] = array(array('model' => 'Logitech K120', 'serial_no' => null, 'spec' => 'USB 046D:C31C'));
+            $this->report($token, $hw);
+            $a = DB::table('device_anomalies')->where('device_id', $id)->where('status', 'pending')->first();
+            $diff = json_decode($a['diff'], true);
+            $this->same(array('keyboard', 'keyboard'), array($diff['added'][0]['ctype'], $diff['removed'][0]['ctype']));
+            $this->status(200, $this->request('POST', '/api/v1/device-anomalies/' . $a['id'] . '/confirm', array()));
+            $this->same('Logitech K120', (string) $parts('keyboard')[0]['model']);
+
+            // a mouse of the same model but another serial number: found as well
+            $hw['mouse'][0]['serial_no'] = 'D4:F5:47:0E:99:99';
+            $this->report($token, $hw);
+            $this->same(2, $anomalies(), 'a mouse with another serial number is a change');
+
+            // the keyboard and mouse taken out of the scope again: not reported missing
+            $this->status(200, $this->request('PUT', '/api/v1/collect-scope', array('items' => $base)));
+            $this->report($token, $hw);
+            $this->same(2, $anomalies());
+        } finally {
+            $this->request('PUT', '/api/v1/collect-scope', array('items' => $base));
+        }
     }
 
     public function testImportAndExport()

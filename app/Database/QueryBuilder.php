@@ -169,6 +169,45 @@ class QueryBuilder
     }
 
     /** LIKE search on several columns joined by OR; the term is escaped. */
+    /**
+     * Period filter of a list: $from / $to are Y-m-d or '' (open end); works for DATE and DATETIME
+     * columns (the whole last day is included).
+     */
+    public function wherePeriod($col, $from, $to)
+    {
+        if ($from !== '' && $from !== null) {
+            $this->where($col, '>=', $from . ' 00:00:00');
+        }
+        if ($to !== '' && $to !== null) {
+            $this->where($col, '<=', $to . ' 23:59:59');
+        }
+        return $this;
+    }
+
+    /**
+     * Keyword of a list: in the one field chosen ($field, a key of $map) or in all of them.
+     * $map = [field key => column]; a column may also be a list of columns.
+     */
+    /** Both filters of a list at once: $f from Controller::filterArgs, $dateCol for the period (null = none). */
+    public function whereFilters(array $f, $dateCol, array $map)
+    {
+        if ($dateCol !== null) {
+            $this->wherePeriod($dateCol, isset($f['from']) ? $f['from'] : '', isset($f['to']) ? $f['to'] : '');
+        }
+        return $this->whereKeyword($map, isset($f['kw']) ? $f['kw'] : '', isset($f['field']) ? $f['field'] : '');
+    }
+
+    public function whereKeyword(array $map, $term, $field = '')
+    {
+        $cols = array();
+        foreach (($field !== '' && isset($map[$field])) ? array($map[$field]) : array_values($map) as $c) {
+            foreach ((array) $c as $one) {
+                $cols[] = $one;
+            }
+        }
+        return $this->whereLikeAny($cols, $term);
+    }
+
     public function whereLikeAny(array $cols, $term)
     {
         $term = (string) $term;

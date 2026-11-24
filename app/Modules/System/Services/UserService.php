@@ -30,14 +30,16 @@ class UserService
         return $q;
     }
 
+    /** Keyword fields of the user list (the browser offers the same keys). */
+    const SEARCH = array('username' => 'u.username', 'name' => array('u.display_name', 'p.name'), 'dept' => 'd.name');
+
+    /** $f = role_id, status and the list filters (period on the day the account was created). */
     public static function search($actor, array $f, $page, $size)
     {
         $q = self::scoped($actor)->leftJoin('departments d', 'd.id', '=', 'p.dept_id')
             ->select(array('u.id', 'u.username', 'u.display_name', 'u.person_id', 'u.role_id', 'u.is_device_admin', 'u.status', 'u.locked_until', 'u.last_login_at',
                 'u.must_change_password', 'r.code as role_code', 'r.is_builtin as role_builtin', 'p.name as person_name', 'd.name as dept_name'));
-        if (isset($f['kw']) && $f['kw'] !== '') {
-            $q->whereLikeAny(array('u.username', 'u.display_name', 'p.name'), $f['kw']);
-        }
+        $q->whereFilters($f, 'u.created_at', self::SEARCH);
         if (!empty($f['role_id'])) {
             $q->where('u.role_id', (int) $f['role_id']);
         }

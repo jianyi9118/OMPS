@@ -20,7 +20,7 @@ class Console
         'migrate:fresh' => 'Drop all tables and migrate again (only when APP_ENV=testing)',
         'seed' => 'Sync base data: languages, roles, permissions, menus, dictionaries',
         'admin:create' => 'Create a super admin (password typed at the prompt; --password-stdin for scripts)',
-        'cleanup' => 'Delete expired temporary files; purge recycle-bin files older than 30 days and read notifications older than 180 days',
+        'cleanup' => 'Delete expired temporary files; purge recycle-bin files older than 30 days; delete logs past the kept period (数据备份 → 自动清理)',
         'schedule:run' => 'Send due reminders and make the daily automatic backup (run every 5 minutes from Windows Task Scheduler)',
         'backup:create' => 'Back up the database and the uploaded files now (zip in BACKUP_PATH)',
         'backup:restore' => 'Restore a backup: php omps backup:restore <file name in BACKUP_PATH> (makes a safety backup first; --force ignores another APP_KEY)',
@@ -288,8 +288,13 @@ class Console
             DB::table('files')->where('id', (int) $f['id'])->delete();
             $purged++;
         }
-        $old = DB::table('notifications')->whereNotNull('read_at')->where('created_at', '<', date('Y-m-d H:i:s', time() - 180 * 86400))->delete();
-        self::line('Temporary files removed: ' . $n . '; recycle-bin files purged: ' . $purged . '; old notifications removed: ' . $old);
+        $old = \Omps\Engines\Retention::run();
+        self::line('Temporary files removed: ' . $n . '; recycle-bin files purged: ' . $purged . '; old log rows removed: ' . array_sum($old));
+        foreach ($old as $table => $rows) {
+            if ($rows > 0) {
+                self::line('  ' . $table . ': ' . $rows);
+            }
+        }
         return 0;
     }
 

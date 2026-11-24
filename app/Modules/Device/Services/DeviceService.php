@@ -25,7 +25,7 @@ class DeviceService
     const CATEGORIES = array('pc', 'laptop', 'server', 'printer', 'scanner', 'network', 'monitor', 'projector', 'phone', 'other');
     const STATUSES = array('normal', 'fault', 'repairing', 'disabled', 'scrapped');
     const MANUAL_STATUSES = array('normal', 'disabled', 'scrapped');
-    const CTYPES = array('cpu', 'memory', 'disk', 'board', 'monitor', 'nic', 'gpu', 'other');
+    const CTYPES = array('cpu', 'memory', 'disk', 'board', 'monitor', 'nic', 'keyboard', 'mouse', 'gpu', 'other');
 
     /** Sees all devices? */
     public static function wide($user)
@@ -108,13 +108,29 @@ class DeviceService
             'depts' => $depts, 'people' => $people, 'caps' => self::caps($req->user), 'scope_items' => CollectorService::scope(), 'custom' => \Omps\Engines\CustomFields::defs('device'));
     }
 
+    /** Keyword fields of the device list (the browser offers the same keys). */
+    const SEARCH = array('asset_no' => 'd.asset_no', 'name' => 'd.name', 'model' => array('d.brand', 'd.model'), 'serial_no' => 'd.serial_no', 'holder' => 'hp.name',
+        'dept' => 'dp.name', 'location' => 'd.location', 'remark' => 'd.remark');
+
+    /** $f = list filters (period on the purchase date; a search in all fields also looks in the custom fields) + category, status, dept_id. */
     public static function search(Request $req, array $f, $page, $size)
     {
         self::need($req, 'view');
         $q = self::base();
         self::scopeQuery($q, $req->user, 'd');
-        if (!empty($f['kw'])) {
-            $q->whereLikeAnyOrIn(array('d.asset_no', 'd.name', 'd.model', 'd.serial_no', 'd.location', 'hp.name'), $f['kw'], 'd.id', \Omps\Engines\CustomFields::matchIds('device', $f['kw']));
+        $q->wherePeriod('d.purchase_date', isset($f['from']) ? $f['from'] : '', isset($f['to']) ? $f['to'] : '');
+        $kw = isset($f['kw']) ? (string) $f['kw'] : '';
+        $field = isset($f['field']) ? (string) $f['field'] : '';
+        if ($kw !== '' && array_key_exists($field, self::SEARCH)) {
+            $q->whereKeyword(self::SEARCH, $kw, $field);
+        } elseif ($kw !== '') {
+            $cols = array();
+            foreach (self::SEARCH as $c) {
+                foreach ((array) $c as $one) {
+                    $cols[] = $one;
+                }
+            }
+            $q->whereLikeAnyOrIn($cols, $kw, 'd.id', \Omps\Engines\CustomFields::matchIds('device', $kw));
         }
         if (!empty($f['category'])) {
             $q->where('d.category', $f['category']);

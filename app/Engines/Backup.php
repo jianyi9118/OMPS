@@ -507,7 +507,10 @@ class Backup
     /** Remove automatic backups older than the kept number of days (manual ones are kept). */
     public static function prune()
     {
-        $days = max(1, (int) Settings::get('backup_keep_days', 14));
+        $days = (int) Settings::get('backup_keep_days', 14);
+        if ($days <= 0) {
+            return 0; // kept for ever
+        }
         $limit = date('Y-m-d H:i:s', time() - $days * 86400);
         $n = 0;
         foreach (DB::select("SELECT * FROM backup_logs WHERE kind IN ('auto', 'pre_restore', 'pre_migrate') AND started_at < ?", array($limit)) as $r) {

@@ -9,6 +9,7 @@ use Omps\Core\ValidationException;
 use Omps\Database\DB;
 use Omps\Engines\Audit;
 use Omps\Engines\Backup;
+use Omps\Engines\Retention;
 
 /**
  * 数据备份 (phase 9, super administrator): back up now, daily automatic backup settings, list,
@@ -45,7 +46,9 @@ class BackupService
         $free = @disk_free_space(is_dir(Backup::dir()) ? Backup::dir() : OMPS_ROOT);
         return array('rows' => $rows, 'dir' => str_replace('/', DIRECTORY_SEPARATOR, Backup::dir()), 'free' => $free === false ? null : (float) $free,
             'settings' => array('auto' => (string) Settings::get('backup_auto', '1') === '1', 'time' => (string) Settings::get('backup_time', '02:00'),
-                'keep_days' => (int) Settings::get('backup_keep_days', 14)));
+                'keep_days' => (int) Settings::get('backup_keep_days', 14), 'logs_months' => Retention::logsMonths(), 'audit_months' => Retention::auditMonths()),
+            'choices' => array('days' => Retention::BACKUP_DAYS, 'months' => Retention::MONTHS),
+            'sizes' => Retention::sizes(), 'last_clean' => Settings::get('retention_last_run', null));
     }
 
     public static function create(Request $req)
@@ -63,18 +66,34 @@ class BackupService
     {
         $auto = !empty($in['auto']);
         $time = isset($in['time']) ? (string) $in['time'] : '';
-        $keep = isset($in['keep_days']) ? (int) $in['keep_days'] : 0;
+        $keep = isset($in['keep_days']) ? (int) $in['keep_days'] : -1;
+        $logs = isset($in['logs_months']) ? (int) $in['logs_months'] : Retention::logsMonths();
+        $audit = isset($in['audit_months']) ? (int) $in['audit_months'] : Retention::auditMonths();
         if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)) {
             throw ValidationException::field('time', 'validation.format', array('field' => __('backup.time')));
         }
-        if ($keep < 1 || $keep > 365) {
+        // the listed periods, or the number of days kept so far (set before the list existed)
+        if (!in_array($keep, Retention::BACKUP_DAYS, true) && $keep !== (int) Settings::get('backup_keep_days', 14)) {
             throw ValidationException::field('keep_days', 'backup.err.keep');
         }
-        $before = array('auto' => Settings::get('backup_auto', '1'), 'time' => Settings::get('backup_time', '02:00'), 'keep_days' => Settings::get('backup_keep_days', 14));
+        if (!in_array($logs, Retention::MONTHS, true)) {
+            throw ValidationException::field('logs_months', 'backup.err.keep');
+        }
+        if (!in_array($audit, Retention::MONTHS, true)) {
+            throw ValidationException::field('audit_months', 'backup.err.keep');
+        }
+        $before = array('auto' => Settings::get('backup_auto', '1'), 'time' => Settings::get('backup_time', '02:00'), 'keep_days' => Settings::get('backup_keep_days', 14),
+            'logs_months' => Retention::logsMonths(), 'audit_months' => Retention::auditMonths());
         Settings::set('backup_auto', $auto ? '1' : '0', $req->userId());
         Settings::set('backup_time', $time, $req->userId());
         Settings::set('backup_keep_days', $keep, $req->userId());
-        Audit::change($req, 'backup', 'backup_settings', 'settings', null, null, $before, array('auto' => $auto ? '1' : '0', 'time' => $time, 'keep_days' => $keep));
+        Settings::set('retain_logs_months', $logs, $req->userId());
+        Settings::set('retain_audit_months', $audit, $req->userId());
+        Audit::change($req, 'backup', 'backup_settings', 'settings', null, null, $before,
+            array('auto' => $auto ? '1' : '0', 'time' => $time, 'keep_days' => $keep, 'logs_months' => $logs, 'audit_months' => $audit));
+        // a shorter period takes effect now, not tomorrow
+        Retention::run();
+        Backup::prune();
         return self::index();
     }
 

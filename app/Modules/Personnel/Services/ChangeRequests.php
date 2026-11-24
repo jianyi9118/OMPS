@@ -70,8 +70,11 @@ class ChangeRequests
         return array_map(array(__CLASS__, 'present'), $rows);
     }
 
-    /** Requests the user may review (status filter: pending by default). */
-    public static function reviewable(Request $req, $status, $page, $size)
+    /** Keyword fields of the review list (the content is sealed JSON and is not searched). */
+    const SEARCH = array('name' => 'p.name', 'dept' => 'd.name', 'reviewer' => 'ru.display_name', 'comment' => 'c.review_comment');
+
+    /** Requests the user may review (status filter: pending by default); $f = list filters, period on the submitted time. */
+    public static function reviewable(Request $req, $status, array $f, $page, $size)
     {
         if (!Permission::can($req->user, 'staff.audit')) {
             throw HttpException::forbidden();
@@ -82,15 +85,18 @@ class ChangeRequests
             $q->where('c.person_id', '<>', (int) $req->user['person_id']);
         }
         $q->where('c.status', in_array($status, array('pending', 'approved', 'returned', 'withdrawn'), true) ? $status : 'pending');
+        $q->whereFilters($f, 'c.submitted_at', self::SEARCH);
         $res = $q->orderBy('c.id', $status === 'pending' ? 'ASC' : 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'present'), $res['rows']);
         return $res;
     }
 
-    public static function mine(Request $req, $page, $size)
+    /** My own requests; $f = list filters (period on the submitted time). */
+    public static function mine(Request $req, array $f, $page, $size)
     {
         $pid = $req->user['person_id'];
         $q = self::base()->where('c.person_id', $pid === null ? 0 : (int) $pid);
+        $q->whereFilters($f, 'c.submitted_at', array('reviewer' => 'ru.display_name', 'comment' => 'c.review_comment'));
         $res = $q->orderBy('c.id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'present'), $res['rows']);
         return $res;

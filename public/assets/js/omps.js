@@ -65,6 +65,12 @@
 
   /* JSON API. Resolves with data; rejects with {status, code, message, fields}. */
   function api(method, path, body, query) {
+    if (query && query.page !== undefined && query.size === undefined) {
+      var q2 = {};
+      for (var qk in query) if (Object.prototype.hasOwnProperty.call(query, qk)) q2[qk] = query[qk];
+      q2.size = pageSize();
+      query = q2;
+    }
     var opts = { method: method, credentials: "same-origin", headers: { "Accept": "application/json", "X-CSRF-Token": BOOT.csrf || "" } };
     if (body !== undefined && body !== null) {
       opts.headers["Content-Type"] = "application/json";
@@ -365,23 +371,319 @@
     return wrap;
   }
 
+  /* ---------- lists: page size, pager, period and keyword filters (every list) ---------- */
+  var PAGE_SIZES = [10, 20, 30, 50, 100];
+  /** The page size this viewer chose (kept in the browser), 30 until changed. */
+  function pageSize(v) {
+    if (v !== undefined) { store("omps.pageSize", String(v)); return v; }
+    var n = +(store("omps.pageSize") || 0);
+    return PAGE_SIZES.indexOf(n) >= 0 ? n : 30;
+  }
+
+  /* pager: total on the left; page size and « ‹ [page] / pages › » on the right (type a page number and press Enter).
+     In a narrow column it takes two lines: total and size, then the page buttons. */
   function pager(res, onPage) {
     var el = d.createElement("div");
     el.className = "pager";
-    var pages = Math.max(1, Math.ceil(res.total / res.size));
-    var html = esc(t("common.total", { n: res.total }));
-    if (pages > 1) {
-      var from = Math.max(1, res.page - 3), to = Math.min(pages, from + 6);
-      if (res.page > 1) html += '<button type="button" data-p="' + (res.page - 1) + '">‹</button>';
-      for (var p = from; p <= to; p++) html += '<button type="button" data-p="' + p + '"' + (p === res.page ? ' class="on"' : "") + ">" + p + "</button>";
-      if (res.page < pages) html += '<button type="button" data-p="' + (res.page + 1) + '">›</button>';
+    var size = res.size || pageSize();
+    var pages = Math.max(1, Math.ceil(res.total / size));
+    var cur = Math.min(Math.max(1, res.page || 1), pages);
+    function btn(p, label, tip, off) {
+      return '<button type="button"' + (off ? " disabled" : ' data-p="' + p + '"') + ' title="' + esc(tip) + '" aria-label="' + esc(tip) + '">' + label + "</button>";
     }
-    el.innerHTML = html;
+    el.innerHTML = '<span class="pg-info">' + esc(t("common.total", { n: res.total })) + "</span>" +
+      '<label class="pg-size">' + esc(t("pager.per_page")) + ' <select>' + PAGE_SIZES.map(function (n) {
+        return '<option value="' + n + '"' + (n === size ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></label>" +
+      '<span class="pg-nav">' + btn(1, "«", t("pager.first"), cur <= 1) + btn(cur - 1, "‹", t("pager.prev"), cur <= 1) +
+      '<span class="pg-cur"><input type="text" inputmode="numeric" maxlength="6" value="' + cur + '" aria-label="' + esc(t("pager.go_to_label")) + '" title="' + esc(t("pager.go_to_label")) + '"' +
+      (pages > 1 ? "" : " readonly") + '><span class="pg-of">/ ' + pages + "</span></span>" +
+      btn(cur + 1, "›", t("pager.next"), cur >= pages) + btn(pages, "»", t("pager.last"), cur >= pages) + "</span>";
+    var inp = el.querySelector(".pg-cur input");
+    function jump() {
+      var n = parseInt(inp.value, 10);
+      if (!(n >= 1)) { inp.value = cur; return; }
+      n = Math.min(n, pages);
+      if (n === cur) { inp.value = cur; return; }
+      onPage(n);
+    }
     el.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button[data-p]") : null;
       if (b) onPage(+b.getAttribute("data-p"));
     });
+    inp.addEventListener("focus", function () { inp.select(); });
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); jump(); }
+      else if (e.key === "Escape") { inp.value = cur; inp.blur(); }
+    });
+    inp.addEventListener("change", jump);
+    el.querySelector(".pg-size select").addEventListener("change", function (e) { pageSize(+e.target.value); onPage(1); });
     return el;
+  }
+
+  /* period presets as dates (weeks start on Monday) */
+  function periodRange(code) {
+    var n = new Date();
+    n.setHours(0, 0, 0, 0);
+    if (code === "day") return [ymd(n), ymd(n)];
+    if (code === "week") {
+      var s = new Date(n);
+      s.setDate(n.getDate() - (n.getDay() + 6) % 7);
+      var e = new Date(s);
+      e.setDate(s.getDate() + 6);
+      return [ymd(s), ymd(e)];
+    }
+    if (code === "month") return [ymd(new Date(n.getFullYear(), n.getMonth(), 1)), ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0))];
+    if (code === "year") return [n.getFullYear() + "-01-01", n.getFullYear() + "-12-31"];
+    return ["", ""];
+  }
+
+  /*
+   * Filter controls for a list bar: one search box, a "Filter" button that opens a panel, and a tag
+   * for every filter in effect (× clears it). opt: {
+   *   state: object that gets period / from / to / kw / field,
+   *   onChange(): reload from page 1 (state.page is reset here),
+   *   period: label of the date the period applies to (e.g. t("device.fault.reported_at")), omit for none,
+   *   fields: [[key, label], ...] the keyword can be limited to (first choice "all fields"), omit for none,
+   *   placeholder: search hint, compact: true in a narrow side panel }
+   * The page's own drop-downs in the same bar (category, status, department...) move into the panel
+   * and keep working as before; status chips and action buttons stay in the bar.
+   * Returns an element to put into the bar; it does not reload by itself on creation.
+   */
+  var PERIODS = [["all", "period.all"], ["day", "period.day"], ["week", "period.week"], ["month", "period.month"], ["year", "period.year"], ["custom", "period.custom"]];
+  function filters(opt) {
+    var st = opt.state;
+    if (!st.period) st.period = "all";
+    if (st.from === undefined) st.from = "";
+    if (st.to === undefined) st.to = "";
+    if (st.kw === undefined) st.kw = "";
+    if (st.field === undefined) st.field = "";
+    var el = d.createElement("div");
+    el.className = "flt" + (opt.compact ? " compact" : "");
+    var ph = opt.placeholder || t("filter.search");
+    el.innerHTML = '<span class="flt-kw">' + icon("search", 14) + '<input type="search" value="' + esc(st.kw) + '" placeholder="' + esc(ph) + '" aria-label="' + esc(ph) + '"></span>' +
+      '<span class="flt-more"><button type="button" class="btn flt-btn" aria-haspopup="true" aria-expanded="false">' + icon("filter", 14) + " " + esc(t("filter.button")) +
+      '<b class="flt-n" hidden></b></button><div class="flt-pop" role="dialog" aria-label="' + esc(t("filter.button")) + '" hidden><div class="flt-rows"></div>' +
+      '<div class="flt-foot"><button type="button" class="btn link flt-reset">' + esc(t("filter.reset")) + '</button><span class="sp"></span><button type="button" class="btn pri flt-done">' +
+      esc(t("filter.done")) + "</button></div></div></span><span class=\"flt-tags\"></span>";
+    var pop = el.querySelector(".flt-pop"), rows = el.querySelector(".flt-rows"), tags = el.querySelector(".flt-tags"), btnEl = el.querySelector(".flt-btn");
+    var adopted = [];
+
+    function changed() { st.page = 1; opt.onChange(); refresh(); }
+    var firstOwn = null;
+    function row(label, html, own) {
+      var r = d.createElement("div");
+      r.className = "flt-row";
+      r.innerHTML = '<span class="flt-l">' + esc(label) + '</span><div class="flt-c">' + (html || "") + "</div>";
+      // the page's own filters come first, then the period and the search field
+      if (own && firstOwn === null) firstOwn = rows.firstChild;
+      if (own) rows.insertBefore(r, firstOwn); else rows.appendChild(r);
+      return r.querySelector(".flt-c");
+    }
+    if (opt.period) {
+      row(opt.period, '<span class="seg" role="group">' + PERIODS.map(function (c) {
+        return '<button type="button" data-pd="' + c[0] + '" aria-pressed="' + (st.period === c[0]) + '"' + (st.period === c[0] ? ' class="on"' : "") + ">" + esc(t(c[1])) + "</button>"; }).join("") +
+        '</span><span class="flt-range"' + (st.period === "custom" ? "" : " hidden") + ">" + dateInput("", st.from, ' data-k="from" aria-label="' + esc(t("period.from")) + '"') +
+        '<span class="muted">–</span>' + dateInput("", st.to, ' data-k="to" aria-label="' + esc(t("period.to")) + '"') + "</span>");
+    }
+    if (opt.fields && opt.fields.length) {
+      row(t("filter.field"), '<select data-fld>' + '<option value="">' + esc(t("filter.all_fields")) + "</option>" + opt.fields.map(function (f) {
+        return '<option value="' + esc(f[0]) + '"' + (st.field === f[0] ? " selected" : "") + ">" + esc(f[1]) + "</option>"; }).join("") + "</select>");
+    }
+
+    /* the page's own drop-downs next to us move into the panel (with their listeners) */
+    function labelOf(node, sel) {
+      if (node !== sel) {
+        var txt = "";
+        for (var i = 0; i < node.childNodes.length; i++) if (node.childNodes[i].nodeType === 3) txt += node.childNodes[i].nodeValue;
+        txt = txt.replace(new RegExp("\\s*[^\\s\\w\\u3400-\\u9fff]+\\s*$"), "").trim(); // drop a trailing colon in any script
+        if (txt) return txt;
+      }
+      if (sel.getAttribute("aria-label") || sel.title) return sel.getAttribute("aria-label") || sel.title;
+      // a first option "<All>xx" or "xx: <All>" (<All> = this language's word for "all") gives the name xx;
+      // that option then reads just "<All>"
+      var o = sel.options.length && sel.options[0].value === "" ? sel.options[0] : null;
+      var all = t("period.all").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      var m = o ? (new RegExp("^" + all + "\\s*(.+)$", "i").exec(o.text) || new RegExp("^(.+?)\\s*[^\\s\\w\\u3400-\\u9fff]\\s*" + all + "$", "i").exec(o.text)) : null;
+      if (!m) return "";
+      o.text = t("period.all");
+      var name = m[1].trim();
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+    function adopt() {
+      var bar = el.parentNode;
+      if (!bar) return;
+      var kids = Array.prototype.slice.call(bar.children);
+      kids.forEach(function (n) {
+        if (n === el || n.hasAttribute("data-keep")) return;
+        var sel = n.tagName === "SELECT" ? n : (n.tagName === "LABEL" ? n.querySelector("select") : null);
+        if (!sel) return;
+        var label = labelOf(n, sel);
+        var c = row(label || t("filter.other"), "", true);
+        if (!label) c.parentNode.classList.add("nolabel");
+        var entry = { sel: sel, label: label, shown: label, row: c.parentNode, wrap: n };
+        if (n !== sel) {
+          // keep the select, drop the label text now shown on the left
+          for (var i = n.childNodes.length - 1; i >= 0; i--) if (n.childNodes[i].nodeType === 3) n.removeChild(n.childNodes[i]);
+        }
+        c.appendChild(n);
+        adopted.push(entry);
+        // pages may refill the options later (e.g. after each load): keep the name and the plain "All"
+        // and may hide one that does not apply (e.g. the result filter outside the login log): hide its row too
+        if (w.MutationObserver) {
+          new MutationObserver(function (ms) {
+            for (var i = 0; i < ms.length; i++) if (ms[i].type === "childList") entry.label = "";
+            refresh();
+          }).observe(sel, { childList: true, attributes: true, attributeFilter: ["hidden", "style"] });
+        }
+        sel.addEventListener("change", function () { setTimeout(refresh, 0); });
+      });
+      refresh();
+    }
+    setTimeout(adopt, 0);
+
+    /* tags for what is in effect, and the count on the button */
+    function periodText() {
+      if (st.period === "custom") {
+        if (st.from && st.to) return st.from + " – " + st.to;
+        return st.from ? "≥ " + st.from : (st.to ? "≤ " + st.to : "");
+      }
+      for (var i = 0; i < PERIODS.length; i++) if (PERIODS[i][0] === st.period) return t(PERIODS[i][1]);
+      return "";
+    }
+    function refresh() {
+      // drop-downs filled after we took them (options loaded later): name them now
+      adopted.forEach(function (a) {
+        if (a.label) return;
+        a.label = labelOf(a.wrap, a.sel) || a.shown || "";
+        if (a.label) { a.shown = a.label; a.row.classList.remove("nolabel"); a.row.querySelector(".flt-l").textContent = a.label; }
+      });
+      adopted.forEach(function (a) { a.row.hidden = a.sel.hidden || a.sel.style.display === "none" || (a.wrap !== a.sel && a.wrap.hidden); });
+      var list = [];
+      if (opt.period && st.period !== "all" && periodText()) list.push({ k: "period", text: t("filter.tag", { name: opt.period, value: periodText() }) });
+      adopted.forEach(function (a, i) {
+        if (!a.row.hidden && a.sel.selectedIndex > 0 && a.sel.value !== "") {
+          var o = a.sel.options[a.sel.selectedIndex].text;
+          list.push({ k: "sel" + i, text: a.label && o.indexOf(a.label) < 0 ? t("filter.tag", { name: a.label, value: o }) : o });
+        }
+      });
+      if (st.field && opt.fields) {
+        opt.fields.forEach(function (f) { if (f[0] === st.field) list.push({ k: "field", text: t("filter.tag", { name: t("filter.field"), value: f[1] }) }); });
+      }
+      tags.innerHTML = list.map(function (x) {
+        return '<span class="flt-tag">' + esc(x.text) + '<button type="button" data-x="' + x.k + '" title="' + esc(t("filter.remove")) + '" aria-label="' + esc(t("filter.remove") + " " + x.text) + '">×</button></span>';
+      }).join("");
+      var n = el.querySelector(".flt-n");
+      n.hidden = !list.length;
+      n.textContent = list.length;
+      btnEl.classList.toggle("on", list.length > 0);
+    }
+
+    function setPeriod(code) {
+      st.period = code;
+      var bs = el.querySelectorAll("[data-pd]");
+      for (var i = 0; i < bs.length; i++) { var on = bs[i].getAttribute("data-pd") === code; bs[i].classList.toggle("on", on); bs[i].setAttribute("aria-pressed", on ? "true" : "false"); }
+      el.querySelector(".flt-range").hidden = code !== "custom";
+      if (code === "custom") {
+        st.from = el.querySelector('[data-k="from"]').value.trim();
+        st.to = el.querySelector('[data-k="to"]').value.trim();
+        if (!st.from && !st.to) { el.querySelector('[data-k="from"]').focus(); refresh(); return; }
+      } else {
+        var r = periodRange(code);
+        st.from = r[0];
+        st.to = r[1];
+      }
+      changed();
+    }
+    function clear(k, quiet) {
+      if (k === "period") {
+        st.period = "all"; st.from = ""; st.to = "";
+        var fi = el.querySelector('[data-k="from"]'), ti = el.querySelector('[data-k="to"]');
+        if (fi) { fi.value = ""; ti.value = ""; }
+        var bs = el.querySelectorAll("[data-pd]");
+        for (var i = 0; i < bs.length; i++) { var on = bs[i].getAttribute("data-pd") === "all"; bs[i].classList.toggle("on", on); bs[i].setAttribute("aria-pressed", on ? "true" : "false"); }
+        if (el.querySelector(".flt-range")) el.querySelector(".flt-range").hidden = true;
+        if (!quiet) changed();
+      } else if (k === "field") {
+        st.field = "";
+        el.querySelector("[data-fld]").value = "";
+        if (!quiet && st.kw) changed(); else refresh();
+      } else {
+        var a = adopted[+k.slice(3)];
+        a.sel.selectedIndex = 0;
+        a.sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+
+    /* panel open / close */
+    function close() {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      btnEl.setAttribute("aria-expanded", "false");
+      d.removeEventListener("mousedown", outside, true);
+      d.removeEventListener("keydown", onKey, true);
+    }
+    function outside(e) {
+      if (el.querySelector(".flt-more").contains(e.target)) return;
+      if (e.target.closest && e.target.closest(".dp")) return; // the date picker belongs to the panel
+      close();
+    }
+    function onKey(e) { if (e.key === "Escape" && !d.querySelector(".dp")) { close(); btnEl.focus(); } }
+    btnEl.addEventListener("click", function () {
+      if (!pop.hidden) { close(); return; }
+      pop.hidden = false;
+      btnEl.setAttribute("aria-expanded", "true");
+      // keep the panel on screen
+      pop.style.left = "0";
+      pop.style.right = "auto";
+      var r = pop.getBoundingClientRect();
+      if (r.right > w.innerWidth - 8) { pop.style.left = "auto"; pop.style.right = "0"; }
+      d.addEventListener("mousedown", outside, true);
+      d.addEventListener("keydown", onKey, true);
+    });
+    el.querySelector(".flt-done").addEventListener("click", close);
+    el.querySelector(".flt-reset").addEventListener("click", function () {
+      var any = false;
+      if (opt.period && st.period !== "all") { clear("period", true); any = true; }
+      if (st.field) { clear("field", true); any = true; }
+      adopted.forEach(function (a) {
+        if (a.sel.selectedIndex > 0) { a.sel.selectedIndex = 0; any = true; }
+      });
+      if (!any) return;
+      // one reload: the page reads its drop-downs on change; tell it through the first one, else reload here
+      if (adopted.length) adopted[0].sel.dispatchEvent(new Event("change", { bubbles: true }));
+      else changed();
+      refresh();
+    });
+
+    el.addEventListener("click", function (e) {
+      var x = e.target.closest ? e.target.closest("[data-x]") : null;
+      if (x) { clear(x.getAttribute("data-x")); return; }
+      var b = e.target.closest ? e.target.closest("[data-pd]") : null;
+      if (b) setPeriod(b.getAttribute("data-pd"));
+    });
+    el.addEventListener("change", function (e) {
+      var k = e.target.getAttribute && e.target.getAttribute("data-k");
+      if (k === "from" || k === "to") {
+        var v = e.target.value.trim();
+        if (v && !parseYmd(v)) return;
+        st[k] = v;
+        changed();
+      } else if (e.target.hasAttribute && e.target.hasAttribute("data-fld")) {
+        st.field = e.target.value;
+        if (st.kw) changed(); else refresh();
+      }
+    });
+    var box = el.querySelector('input[type="search"]');
+    box.addEventListener("input", debounce(function () {
+      var v = box.value.trim();
+      if (v !== st.kw) { st.kw = v; changed(); }
+    }, 350));
+    return el;
+  }
+
+  /** Query parameters of the filters, to merge into a list request. */
+  function filterQuery(st) {
+    return { from: st.from || "", to: st.to || "", kw: st.kw || "", field: st.field || "" };
   }
 
   function legend(items) {
@@ -941,7 +1243,7 @@
 
   w.OMPS = {
     boot: BOOT, t: t, esc: esc, icon: icon, url: url, api: api, status: status, failed: failed, modal: modal, confirm: confirmBox, info: info,
-    dropdown: dropdown, form: form, submit: submit, table: table, pager: pager, legend: legend, pill: pill, has: has, debounce: debounce,
+    dropdown: dropdown, form: form, submit: submit, table: table, pager: pager, pageSize: pageSize, filters: filters, filterQuery: filterQuery, periodRange: periodRange, legend: legend, pill: pill, has: has, debounce: debounce,
     deptOpts: deptOpts, on: on, fillIcons: fillIcons, today: today, dateInput: dateInput,
     drawer: drawer, closeDrawer: closeDrawer, repeat: repeat, pickFiles: pickFiles, upload: upload, fileSize: fileSize, docChoices: docChoices,
     notifyText: notifyText, go: go, ago: ago, pulse: pulse, onPulse: function (k, fn) { pulseHooks[k] = fn; if (pulseData) fn(pulseData); },

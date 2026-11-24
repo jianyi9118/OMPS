@@ -65,29 +65,37 @@ class NoteService
             'inbox_unread' => $inbox ? DB::table('notes')->where('submitted_to', $req->userId())->where('status', 'submitted')->count() : 0);
     }
 
-    public static function index(Request $req, $box, $kw, $filter)
+    /** Keyword fields of the lists (the browser offers the same keys); received notes also search the writer. */
+    const SEARCH = array('title' => 'n.title', 'body' => 'n.body', 'reply' => 'n.reply');
+
+    /**
+     * My notes (period on the last change) or the notes submitted to me (period on the submission time).
+     * $f = list filters, paged.
+     */
+    public static function index(Request $req, $box, $filter, array $f, $page, $size)
     {
         $uid = $req->userId();
-        $q = DB::table('notes');
+        $q = DB::table('notes n')->select(array('n.*'));
         if ($box === 'inbox') {
-            $q->where('submitted_to', $uid)->whereIn('status', array('submitted', 'read'));
+            $q->where('n.submitted_to', $uid)->whereIn('n.status', array('submitted', 'read'));
             if ($filter === 'unread') {
-                $q->where('status', 'submitted');
+                $q->where('n.status', 'submitted');
             }
-            $q->orderBy('submitted_at', 'DESC');
+            $q->leftJoin('users ou', 'ou.id', '=', 'n.owner_id')->leftJoin('personnel_profiles op', 'op.id', '=', 'ou.person_id');
+            $q->whereFilters($f, 'n.submitted_at', array_merge(self::SEARCH, array('owner' => array('op.name', 'ou.display_name'))));
+            $q->orderBy('n.submitted_at', 'DESC');
         } else {
-            $q->where('owner_id', $uid);
+            $q->where('n.owner_id', $uid);
             if ($filter === 'private') {
-                $q->where('status', 'private');
+                $q->where('n.status', 'private');
             } elseif ($filter === 'submitted') {
-                $q->whereIn('status', array('submitted', 'read'));
+                $q->whereIn('n.status', array('submitted', 'read'));
             }
-            $q->orderBy('updated_at', 'DESC');
+            $q->whereFilters($f, 'n.updated_at', self::SEARCH);
+            $q->orderBy('n.updated_at', 'DESC');
         }
-        if ($kw !== '') {
-            $q->whereLikeAny(array('title', 'body'), $kw);
-        }
-        $rows = $q->orderBy('id', 'DESC')->limit(500)->get();
+        $res = $q->orderBy('n.id', 'DESC')->paginate($page, $size);
+        $rows = $res['rows'];
         $ids = array();
         foreach ($rows as $r) {
             $ids[] = (int) $r['owner_id'];
@@ -101,7 +109,8 @@ class NoteService
                 'submitted_at' => str_or_empty($r['submitted_at']), 'read_at' => str_or_empty($r['read_at']),
                 'owner' => isset($names[(int) $r['owner_id']]) ? $names[(int) $r['owner_id']] : '', 'to' => isset($names[(int) $r['submitted_to']]) ? $names[(int) $r['submitted_to']] : '');
         }
-        return array('rows' => $out);
+        $res['rows'] = $out;
+        return $res;
     }
 
     /** Own note, or one submitted to me; anything else is 404 (logged). */

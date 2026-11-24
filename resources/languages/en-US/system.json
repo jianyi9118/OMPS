@@ -138,8 +138,6 @@
   "log.tab.operation": "Activity log",
   "log.tab.audit": "Audit log",
   "log.tab.login": "Sign-in log",
-  "log.from": "From",
-  "log.to": "To",
   "log.time": "Time",
   "log.user": "User",
   "log.module": "Module",
@@ -196,5 +194,8 @@
   "log.action.person_retire": "Person retired",
   "log.action.person_move_out": "Moved out of department",
   "log.action.person_deleted": "Staff record deleted",
-  "log.action.access_denied": "Out-of-scope access refused"
+  "log.action.access_denied": "Out-of-scope access refused",
+  "log.agent": "Browser",
+  "log.search": "Search logs",
+  "user.field.created_at": "Created"
 }

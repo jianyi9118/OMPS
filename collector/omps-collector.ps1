@@ -1,8 +1,9 @@
 <#
-  OMPS device collector 1.0 (design document section 14)
+  OMPS device collector 1.1 (design document section 14)
 
   Collects only the hardware items listed in the server's "Collection scope": computer name,
-  operating system, CPU, memory, disks, motherboard, monitors, network adapters.
+  operating system, CPU, memory, disks, motherboard, monitors, network adapters, keyboards, mice.
+  Keyboards and mice: only the model and serial number of external devices, never keystrokes.
   Never collects keystrokes, screen contents, files, browsing history or login accounts.
   Works with the PowerShell 2.0 built into Windows and later; nothing else is installed.
 
@@ -20,7 +21,7 @@ param(
     [string]$ConfigPath = ''
 )
 
-$Version = '1.0'
+$Version = '1.1'
 $AllItems = @('computer_name', 'os', 'cpu', 'memory', 'disk', 'board', 'monitor', 'nic')
 if ($ConfigPath -eq '') { $ConfigPath = Join-Path $env:ProgramData 'OMPS\collector.ini' }
 
@@ -83,6 +84,80 @@ function Text-FromCodes($codes) {
     return $s.Trim()
 }
 
+# ---------- keyboards and mice: external USB and Bluetooth devices only ----------
+# Built-in keyboards and touchpads (PS/2, ACPI, I2C) are left out. A USB device has a serial
+# number only when the last part of its device ID contains no '&' (otherwise Windows made the
+# ID up from the port); a Bluetooth device is identified by its Bluetooth address.
+$script:PnpAll = $null
+function Pnp-All {
+    if ($script:PnpAll -eq $null) { $script:PnpAll = Wmi 'Win32_PnPEntity' }
+    return ,$script:PnpAll
+}
+
+# the product name the device reports itself (Windows 8 and later); $null on older systems
+function Bus-Name($id) {
+    if (-not (Get-Command Get-PnpDeviceProperty -ErrorAction SilentlyContinue)) { return $null }
+    try { return [string](Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction Stop).Data } catch { return $null }
+}
+
+function Bt-Address($s) {
+    $m = [regex]::Match([string]$s, '(?:_|&0&)([0-9A-F]{12})(?=_C[0-9A-F]+$|&|\\|$)', 'IgnoreCase')
+    if (-not $m.Success) { return $null }
+    return ($m.Groups[1].Value.ToUpper() -replace '(..)(?!$)', '$1:')
+}
+
+function Input-Devices($class) {
+    $l = @()
+    $done = @{}
+    foreach ($x in (Wmi $class)) {
+        $id = [string]$x.PNPDeviceID
+        $usb = [regex]::Match($id, 'VID_([0-9A-F]{4})&PID_([0-9A-F]{4})', 'IgnoreCase')
+        $bt = [regex]::Match($id, '_VID&[0-9A-F]*?([0-9A-F]{4})_PID&([0-9A-F]{4})', 'IgnoreCase')
+        if ($usb.Success) {
+            $v = $usb.Groups[1].Value.ToUpper(); $p = $usb.Groups[2].Value.ToUpper()
+            # one keyboard shows up once per interface: list each physical device once
+            if ($done.ContainsKey('U' + $v + $p)) { continue }
+            $done['U' + $v + $p] = 1
+            $found = $false
+            foreach ($e in (Pnp-All)) {
+                $m = [regex]::Match([string]$e.DeviceID, '^USB\\VID_' + $v + '&PID_' + $p + '\\([^\\]+)$', 'IgnoreCase')
+                if (-not $m.Success) { continue }
+                $found = $true
+                $serial = $null
+                if ($m.Groups[1].Value -notmatch '&') { $serial = $m.Groups[1].Value }
+                $name = Bus-Name $e.DeviceID
+                if (-not $name) { $name = $e.Name }
+                $l += J-Item $name $serial ('USB ' + $v + ':' + $p)
+            }
+            if (-not $found) { $l += J-Item $x.Name $null ('USB ' + $v + ':' + $p) }
+        }
+        elseif ($bt.Success) {
+            $v = $bt.Groups[1].Value.ToUpper(); $p = $bt.Groups[2].Value.ToUpper()
+            $addr = Bt-Address $id
+            if (-not $addr) {
+                foreach ($e in (Pnp-All)) {
+                    $d = [string]$e.DeviceID
+                    if ($d -like 'BTHENUM\*' -and $d -match ('_VID&[0-9A-F]*' + $v + '_PID&' + $p)) { $addr = Bt-Address $d; if ($addr) { break } }
+                }
+            }
+            if ($done.ContainsKey('B' + $v + $p + $addr)) { continue }
+            $done['B' + $v + $p + $addr] = 1
+            # the name given when pairing, else the Windows name
+            $name = $null
+            if ($addr) {
+                $hex = $addr -replace ':', ''
+                foreach ($e in (Pnp-All)) {
+                    $d = [string]$e.DeviceID
+                    if ($d -like ('BTHENUM\DEV_' + $hex + '*') -or $d -like ('BTHLE\DEV_' + $hex + '*')) { $name = $e.Name; break }
+                }
+            }
+            if (-not $name) { $name = $x.Name }
+            $l += J-Item $name $addr ('Bluetooth ' + $v + ':' + $p)
+        }
+    }
+    return $l
+}
+
 # ---------- collection: only the items in scope ----------
 function Collect($scope) {
     $parts = @()
@@ -118,6 +193,8 @@ function Collect($scope) {
         }
         $parts += '"nic":' + (J-List $l)
     }
+    if ($scope -contains 'keyboard') { $parts += '"keyboard":' + (J-List (Input-Devices 'Win32_Keyboard')) }
+    if ($scope -contains 'mouse') { $parts += '"mouse":' + (J-List (Input-Devices 'Win32_PointingDevice')) }
     return '{' + ($parts -join ',') + '}'
 }
 

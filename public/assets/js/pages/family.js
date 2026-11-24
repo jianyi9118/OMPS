@@ -3,12 +3,19 @@
   "use strict";
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
-  var state = { kw: "", page: 1 };
+  var state = { page: 1 };
 
-  view.innerHTML = '<div class="note warn">' + O.esc(t("family.page_note")) + '</div><div class="bar"><input type="search" id="fm_kw" placeholder="' + O.esc(t("family.search")) + '"><span class="sp"></span></div><div class="card" id="fm_card"></div>';
+  view.innerHTML = '<div class="note warn">' + O.esc(t("family.page_note")) + '</div><div class="bar"><span class="sp"></span></div><div class="card" id="fm_card"></div>';
+  // no meaningful date here: keyword only (phone and address are encrypted and not searchable)
+  var bar = view.querySelector(".bar");
+  bar.insertBefore(O.filters({ state: state, onChange: load, placeholder: t("family.search"),
+    fields: [["person", t("family.col.person")], ["staff_no", t("staff.field.staff_no")], ["dept", t("staff.field.dept")], ["name", t("family.field.name")],
+      ["employer", t("family.field.employer")], ["position", t("family.field.position")]] }), bar.querySelector(".sp"));
 
   function load() {
-    O.api("GET", "/api/v1/family", null, { kw: state.kw, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.page = state.page;
+    O.api("GET", "/api/v1/family", null, q).then(function (res) {
       var card = document.getElementById("fm_card");
       card.innerHTML = "";
       card.appendChild(O.table({
@@ -34,6 +41,5 @@
     }, O.failed);
   }
 
-  document.getElementById("fm_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; load(); }, 400));
   O.person.meta().then(load, O.failed);
 })();

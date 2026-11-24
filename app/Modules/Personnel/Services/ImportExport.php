@@ -347,9 +347,8 @@ class ImportExport
         if (isset($f['status']) && $f['status'] !== '') {
             $q->where('p.status', $f['status']);
         }
-        if (isset($f['kw']) && $f['kw'] !== '') {
-            $q->whereLikeAny(array('p.name', 'p.staff_no', 'p.position'), $f['kw']);
-        }
+        // the same filters as the staff list, so the file holds what the list shows
+        \Omps\Modules\Organization\Services\StaffService::filter($q, $f);
         $cols = array_merge(self::COLUMNS, array('status'));
         $header = array();
         foreach ($cols as $c) {

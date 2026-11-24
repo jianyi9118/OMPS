@@ -96,6 +96,10 @@ class PerformanceTest extends TestCase
         $list = $this->data($this->request('GET', '/api/v1/perf/reviews'));
         $this->same(array($rid), array_map(function ($x) { return $x['id']; }, $list['rows']));
         $this->same(1, $list['pending']);
+        // list filters: period on the submitted time, keyword in one field
+        $this->same(0, $this->data($this->request('GET', '/api/v1/perf/reviews', null, array('from' => '2000-01-01', 'to' => '2000-12-31')))['total'], 'period');
+        $this->same(1, $this->data($this->request('GET', '/api/v1/perf/reviews', null, array('from' => date('Y-m-d'), 'to' => date('Y-m-d'))))['total'], 'submitted today');
+        $this->same(0, $this->data($this->request('GET', '/api/v1/perf/reviews', null, array('kw' => 'zz-no-such-text', 'field' => 'task')))['total'], 'keyword');
         $this->status(200, $this->request('POST', '/api/v1/perf/reviews/approve', array('ids' => array($rid))));
         $this->same('approved', (string) DB::value('SELECT status FROM performance_reports WHERE id = ?', array($rid)));
         $this->ok($this->auditCount('perf_approved') >= 1);

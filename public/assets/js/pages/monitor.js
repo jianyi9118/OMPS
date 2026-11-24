@@ -4,7 +4,7 @@
   var O = window.OMPS, t = O.t, D = O.device;
   var view = document.getElementById("view");
   var TABS = ["usage", "anomaly", "clients", "scope"];
-  var state = { tab: TABS.indexOf(O.qs("tab")) >= 0 ? O.qs("tab") : "usage", kw: "", page: 1, astatus: "pending", cstatus: "active" };
+  var state = { tab: TABS.indexOf(O.qs("tab")) >= 0 ? O.qs("tab") : "usage", page: 1, astatus: "pending", cstatus: "active" };
   var focusId = +O.qs("id") || 0;
   var M = null;
 
@@ -14,7 +14,8 @@
       '</div><div id="mo_body" style="display:grid;gap:12px"></div>';
     document.getElementById("mo_tabs").addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("[data-tab]") : null;
-      if (b) { state.tab = b.getAttribute("data-tab"); state.page = 1; render(); }
+      // each tab filters on its own date and fields
+      if (b) { state.tab = b.getAttribute("data-tab"); state.page = 1; state.period = "all"; state.from = state.to = state.kw = state.field = ""; render(); }
     });
   }
 
@@ -32,14 +33,17 @@
 
   /* ---------- usage records ---------- */
   function usage() {
-    body('<div class="bar"><input type="search" id="mo_kw" placeholder="' + O.esc(t("device.mon.usage_search")) + '" value="' + O.esc(state.kw) + '"><span class="sp"></span><span class="muted" style="font-size:12.5px">' +
-      O.esc(t("device.mon.usage_hint")) + '</span></div><div class="card" id="mo_card"></div>');
-    document.getElementById("mo_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; loadUsage(); }, 350));
+    var b = body('<div class="bar"><span class="sp"></span><span class="muted" style="font-size:12.5px">' + O.esc(t("device.mon.usage_hint")) + '</span></div><div class="card" id="mo_card"></div>');
+    var bar = b.querySelector(".bar");
+    bar.insertBefore(O.filters({ state: state, onChange: loadUsage, period: t("device.mon.time"), placeholder: t("device.mon.usage_search"), fields: [["asset_no", t("device.field.asset_no")],
+      ["device", t("device.field.name")], ["computer", t("device.coll.computer")], ["ip", t("device.mon.ip")]] }), bar.querySelector(".sp"));
     loadUsage();
   }
 
   function loadUsage() {
-    O.api("GET", "/api/v1/device-usage", null, { kw: state.kw, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.page = state.page;
+    O.api("GET", "/api/v1/device-usage", null, q).then(function (res) {
       var card = document.getElementById("mo_card");
       if (!card) return;
       card.innerHTML = "";
@@ -67,11 +71,17 @@
       var b = e.target.closest ? e.target.closest("[data-as]") : null;
       if (b) { state.astatus = b.getAttribute("data-as"); state.page = 1; anomalies(); }
     });
+    var bar = document.querySelector("#mo_body .bar");
+    bar.insertBefore(O.filters({ state: state, onChange: loadAnomalies, period: t("device.mon.found_at"), placeholder: t("device.mon.a_search"), fields: [["asset_no", t("device.field.asset_no")],
+      ["device", t("device.field.name")], ["changes", t("device.mon.f_changes")], ["handler", t("device.mon.f_handler")], ["note", t("device.field.note")]] }), bar.querySelector(".sp"));
     loadAnomalies();
   }
 
   function loadAnomalies() {
-    O.api("GET", "/api/v1/device-anomalies", null, { status: state.astatus, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.status = state.astatus;
+    q.page = state.page;
+    O.api("GET", "/api/v1/device-anomalies", null, q).then(function (res) {
       badge("anomaly", res.pending);
       var card = document.getElementById("mo_card");
       if (!card) return;
@@ -119,29 +129,44 @@
     body('<div class="note">' + O.esc(t("device.mon.clients_intro")) + (M.caps.edit ? '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' + files.map(function (f) {
         return '<a class="btn sm" href="' + O.esc(O.url("/api/v1/collector-client/" + f)) + '">' + O.icon("download", 14) + " " + O.esc(f) + "</a>"; }).join("") + "</div>" : "") + "</div>" +
       '<div class="bar"><div class="chips">' + [["active", t("device.coll.st.active")], ["pending", t("device.coll.st.pending")], ["revoked", t("device.coll.st.revoked")]].map(function (c) {
-        return '<button type="button" class="chip' + (state.cstatus === c[0] ? " on" : "") + '" data-cs="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + '</div></div><div class="card" id="mo_card"></div>');
+        return '<button type="button" class="chip' + (state.cstatus === c[0] ? " on" : "") + '" data-cs="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + '</div><span class="sp"></span></div>' +
+      '<div class="note" id="mo_outdated" hidden>' + O.esc(t("device.coll.outdated_tip")) + '</div><div class="card" id="mo_card"></div>');
     document.querySelector("#mo_body .chips").addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("[data-cs]") : null;
       if (b) { state.cstatus = b.getAttribute("data-cs"); state.page = 1; clients(); }
     });
-    O.api("GET", "/api/v1/device-collectors", null, { status: state.cstatus, page: state.page }).then(function (res) {
+    var bar = document.querySelector("#mo_body .bar");
+    bar.insertBefore(O.filters({ state: state, onChange: loadClients, period: t("device.coll.last_seen"), placeholder: t("device.mon.c_search"), fields: [["asset_no", t("device.field.asset_no")],
+      ["device", t("device.field.name")], ["computer", t("device.coll.computer")], ["os", t("device.coll.os")], ["version", t("device.coll.version")], ["ip", t("device.mon.ip")]] }), bar.querySelector(".sp"));
+    loadClients();
+  }
+
+  function loadClients() {
+    var q = O.filterQuery(state);
+    q.status = state.cstatus;
+    q.page = state.page;
+    O.api("GET", "/api/v1/device-collectors", null, q).then(function (res) {
       var card = document.getElementById("mo_card");
+      if (!card) return;
+      card.innerHTML = "";
+      document.getElementById("mo_outdated").hidden = !res.rows.some(function (c) { return c.outdated; });
       card.appendChild(O.table({ cols: [
         { t: t("device.col.device"), cls: "wrap", f: function (c) { return '<a class="lk" href="#" data-dev="' + c.device_id + '">' + O.esc(c.asset_no + " " + c.device) + "</a>"; } },
         { t: t("device.coll.computer"), f: function (c) { return O.esc(c.computer_name || "—") + (c.os ? '<div class="muted" style="font-size:12px">' + O.esc(c.os) + "</div>" : ""); } },
-        { t: t("device.coll.version"), f: function (c) { return O.esc(c.version || "—"); } },
+        { t: t("device.coll.version"), f: function (c) {
+          return O.esc(c.version || "—") + (c.outdated ? ' <span class="pill warn" title="' + O.esc(t("device.coll.outdated_tip")) + '">' + O.esc(t("device.coll.outdated")) + "</span>" : ""); } },
         { t: state.cstatus === "pending" ? t("device.coll.expires") : t("device.coll.last_seen"), f: function (c) {
           return '<span class="mono">' + O.esc(state.cstatus === "pending" ? c.enroll_expires.slice(0, 16) : (c.last_seen ? c.last_seen.slice(0, 16) + " · " + c.last_ip : "—")) + "</span>"; } }
       ], rows: res.rows, empty: t("device.coll.list_empty"),
       acts: M.caps.edit && state.cstatus !== "revoked" ? function () { return [{ icon: "ban", tip: t("device.coll.revoke"), danger: true, fn: revoke }]; } : null }));
-      card.appendChild(O.pager(res, function (p) { state.page = p; clients(); }));
+      card.appendChild(O.pager(res, function (p) { state.page = p; loadClients(); }));
       card.onclick = function (e) { var a = e.target.closest ? e.target.closest("[data-dev]") : null; if (a) { e.preventDefault(); D.detail(+a.getAttribute("data-dev"), { tab: 6 }); } };
     }, O.failed);
   }
 
   function revoke(c) {
     O.confirm({ title: t("device.coll.revoke"), msg: t("device.coll.revoke_confirm", { device: c.asset_no + " " + c.device }), danger: true, ok: t("device.coll.revoke") }).then(function (ok) {
-      if (ok) O.api("POST", "/api/v1/device-collectors/" + c.id + "/revoke", {}).then(function () { O.status(t("device.coll.revoked")); clients(); }, O.failed);
+      if (ok) O.api("POST", "/api/v1/device-collectors/" + c.id + "/revoke", {}).then(function () { O.status(t("device.coll.revoked")); loadClients(); }, O.failed);
     });
   }
 

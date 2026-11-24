@@ -138,8 +138,6 @@
   "log.tab.operation": "操作日志",
   "log.tab.audit": "审计日志",
   "log.tab.login": "登录日志",
-  "log.from": "从",
-  "log.to": "到",
   "log.time": "时间",
   "log.user": "用户",
   "log.module": "模块",
@@ -196,5 +194,8 @@
   "log.action.person_retire": "人员退休",
   "log.action.person_move_out": "调出本部门",
   "log.action.person_deleted": "删除人员档案",
-  "log.action.access_denied": "越权访问被拒绝"
+  "log.action.access_denied": "越权访问被拒绝",
+  "log.agent": "浏览器",
+  "log.search": "搜索日志",
+  "user.field.created_at": "创建时间"
 }

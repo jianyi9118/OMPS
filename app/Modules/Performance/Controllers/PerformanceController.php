@@ -45,7 +45,8 @@ class PerformanceController extends Controller
     public function reviews(Request $req)
     {
         $tab = $req->str('tab') === 'done' ? 'done' : 'pending';
-        return PerformanceService::reviews($req, $tab, $req->int('person_id'), $req->str('kw'), max(1, $req->int('page', 1)), 20);
+        list($page, $size) = $this->pageArgs($req);
+        return PerformanceService::reviews($req, $tab, $req->int('person_id'), $this->filterArgs($req), $page, $size);
     }
 
     public function reviewDetail(Request $req)

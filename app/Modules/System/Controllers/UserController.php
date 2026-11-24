@@ -17,7 +17,7 @@ class UserController extends Controller
     public function index(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return UserService::search($req->user, array('kw' => $req->str('kw'), 'role_id' => $req->int('role_id'), 'status' => $req->str('status')), $page, $size);
+        return UserService::search($req->user, array_merge($this->filterArgs($req), array('role_id' => $req->int('role_id'), 'status' => $req->str('status'))), $page, $size);
     }
 
     public function options(Request $req)

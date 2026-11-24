@@ -34,7 +34,8 @@ class RepairService
     {
         $out = array('id' => (int) $f['id'], 'device_id' => (int) $f['device_id'], 'description' => (string) $f['description'], 'status' => (string) $f['status'],
             'reported_at' => (string) $f['reported_at'], 'reporter' => self::name((int) $f['reported_by']), 'closed_at' => str_or_empty($f['closed_at']),
-            'cancel_reason' => str_or_empty($f['cancel_reason']), 'version' => (int) $f['version'], 'repair' => null);
+            'cancel_reason' => str_or_empty($f['cancel_reason']), 'closed_by' => isset($f['closed_by']) && $f['closed_by'] !== null ? self::name((int) $f['closed_by']) : '',
+            'version' => (int) $f['version'], 'repair' => null);
         if (isset($f['asset_no'])) {
             $out['asset_no'] = (string) $f['asset_no'];
             $out['device'] = (string) $f['device_name'];
@@ -122,52 +123,65 @@ class RepairService
         return $q;
     }
 
-    public static function index(Request $req, $status, $kw, $page, $size)
+    /** The requests I reported: what someone without device rights sees on 故障与维修. */
+    private static function mine(Request $req)
     {
-        if (!Permission::can($req->user, 'device.view')) {
-            throw HttpException::forbidden();
-        }
-        $q = self::base($req);
+        return DB::table('device_faults f')->join('devices d', 'd.id', '=', 'f.device_id')->whereNull('d.deleted_at')->where('f.reported_by', $req->userId())
+            ->select(array('f.*', 'd.asset_no', 'd.name as device_name', 'd.location'));
+    }
+
+    /** Keyword fields of the request lists (the browser offers the same keys). */
+    const SEARCH = array('asset_no' => 'd.asset_no', 'device' => 'd.name', 'location' => 'd.location', 'description' => 'f.description', 'cancel_reason' => 'f.cancel_reason');
+
+    /** $f = list filters (period on the report time). */
+    public static function index(Request $req, $status, array $f, $page, $size)
+    {
+        $all = Permission::can($req->user, 'device.view');
+        $q = $all ? self::base($req) : self::mine($req);
         if ($status === 'active') {
             $q->whereIn('f.status', array('open', 'repairing'));
         } elseif (in_array($status, self::STATUSES, true)) {
             $q->where('f.status', $status);
         }
-        if ($kw !== '') {
-            $q->whereLikeAny(array('d.asset_no', 'd.name', 'f.description'), $kw);
-        }
+        $q->whereFilters($f, 'f.reported_at', self::SEARCH);
         $res = $q->orderBy('f.id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentFault'), $res['rows']);
-        $res['open'] = self::base($req)->whereIn('f.status', array('open', 'repairing'))->count();
+        $res['open'] = ($all ? self::base($req) : self::mine($req))->whereIn('f.status', array('open', 'repairing'))->count();
         $res['repairers'] = array();
-        foreach (Notify::deviceAdmins() as $id) {
+        foreach ($all ? Notify::deviceAdmins() : array() as $id) {
             $res['repairers'][] = array('id' => $id, 'name' => self::name($id));
         }
         return $res;
     }
 
-    /** Fixed repairs (维修记录). */
-    public static function repairs(Request $req, $kw, $page, $size)
+    /** Fixed repairs (维修记录); the period is on the day they were fixed. */
+    public static function repairs(Request $req, array $f, $page, $size)
     {
         if (!Permission::can($req->user, 'device.view')) {
             throw HttpException::forbidden();
         }
-        $q = self::base($req)->where('f.status', 'fixed');
-        if ($kw !== '') {
-            $q->whereLikeAny(array('d.asset_no', 'd.name', 'f.description'), $kw);
-        }
+        $q = self::base($req)->where('f.status', 'fixed')->leftJoin('device_repairs r', 'r.fault_id', '=', 'f.id');
+        $q->whereFilters($f, 'f.closed_at', array_merge(self::SEARCH, array('repairer' => 'r.repairer_name', 'result' => 'r.result')));
+        // the total follows the filters (e.g. this year's repairs)
+        $sum = clone $q;
+        $cost = $sum->selectRaw('COALESCE(SUM(r.cost), 0) AS total')->first();
         $res = $q->orderBy('f.closed_at', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentFault'), $res['rows']);
-        $res['cost'] = (string) DB::value("SELECT COALESCE(SUM(r.cost), 0) FROM device_repairs r JOIN device_faults f ON f.id = r.fault_id WHERE f.status = 'fixed'");
+        $res['cost'] = number_format((float) ($cost ? $cost['total'] : 0), 2, '.', '');
         return $res;
     }
 
+    /** A request within my device scope; viewing also covers the requests I reported myself. */
     private static function fault(Request $req, $id, $action = 'view')
     {
-        if (!Permission::can($req->user, 'device.' . $action)) {
+        $can = Permission::can($req->user, 'device.' . $action);
+        if (!$can && $action !== 'view') {
             throw HttpException::forbidden();
         }
-        $f = self::base($req)->where('f.id', (int) $id)->first();
+        $f = $can ? self::base($req)->where('f.id', (int) $id)->first() : null;
+        if (!$f && $action === 'view') {
+            $f = self::mine($req)->where('f.id', (int) $id)->first();
+        }
         if (!$f) {
             Audit::denied($req, 'device_fault', array('id' => (int) $id));
             throw HttpException::notFound();
@@ -181,7 +195,8 @@ class RepairService
         $out = self::presentFault($f);
         $out['files'] = Files::forRecord('device_fault', (int) $f['id']);
         $out['parts'] = array();
-        foreach (DB::table('device_components')->where('device_id', (int) $f['device_id'])->whereNull('removed_on')->orderBy('ctype')->get() as $c) {
+        $parts = Permission::can($req->user, 'device.edit') ? DB::table('device_components')->where('device_id', (int) $f['device_id'])->whereNull('removed_on')->orderBy('ctype')->get() : array();
+        foreach ($parts as $c) {
             $out['parts'][] = array('id' => (int) $c['id'], 'ctype' => (string) $c['ctype'], 'model' => str_or_empty($c['model']), 'serial_no' => str_or_empty($c['serial_no']));
         }
         Notify::markRead($req->userId(), 'device_fault', (int) $f['id']);
@@ -263,7 +278,7 @@ class RepairService
         $uid = $req->userId();
         $repair = DB::table('device_repairs')->where('fault_id', (int) $f['id'])->first();
         DB::transaction(function () use ($f, $v, $parts, $uid, $repair) {
-            if (DB::table('device_faults')->where('id', (int) $f['id'])->where('status', 'repairing')->increment('version', 1, array('status' => 'fixed', 'closed_at' => now())) === 0) {
+            if (DB::table('device_faults')->where('id', (int) $f['id'])->where('status', 'repairing')->increment('version', 1, array('status' => 'fixed', 'closed_at' => now(), 'closed_by' => $uid)) === 0) {
                 throw HttpException::conflict('error.stale');
             }
             DB::table('device_repairs')->where('id', (int) $repair['id'])->update(array('fixed_at' => now(), 'result' => trim((string) $v['result']),
@@ -276,7 +291,7 @@ class RepairService
         });
         Notify::markRead($uid, 'device_fault', (int) $f['id']);
         Notify::send(array((int) $f['reported_by']), 'device_fault_fixed', array('asset' => (string) $f['asset_no'], 'device' => (string) $f['device_name']),
-            '/?repairs=1', 'device_fault', (int) $f['id'], $uid);
+            '/device/repair?id=' . (int) $f['id'], 'device_fault', (int) $f['id'], $uid);
         Audit::op($req->user, 'device', 'device_repair_finished', 'device', (int) $f['device_id'], $f['asset_no'] . ' ' . $f['device_name'],
             array('cost' => isset($v['cost']) ? $v['cost'] : null, 'parts' => count($parts)), $req->ip());
         return array('ok' => true);
@@ -290,16 +305,16 @@ class RepairService
         }
         $v = Validator::check($in, array('reason' => 'required|string|max:200'), array('reason' => 'device.fault.cancel_reason'));
         $uid = $req->userId();
-        DB::transaction(function () use ($f, $v) {
+        DB::transaction(function () use ($f, $v, $uid) {
             if (DB::table('device_faults')->where('id', (int) $f['id'])->whereIn('status', array('open', 'repairing'))->increment('version', 1, array('status' => 'cancelled',
-                'closed_at' => now(), 'cancel_reason' => $v['reason'])) === 0) {
+                'closed_at' => now(), 'closed_by' => $uid, 'cancel_reason' => $v['reason'])) === 0) {
                 throw HttpException::conflict('error.stale');
             }
             self::settleDevice((int) $f['device_id']);
         });
         Notify::markRead($uid, 'device_fault', (int) $f['id']);
         Notify::send(array((int) $f['reported_by']), 'device_fault_cancelled', array('asset' => (string) $f['asset_no'], 'device' => (string) $f['device_name'], 'reason' => (string) $v['reason']),
-            '/?repairs=1', 'device_fault', (int) $f['id'], $uid);
+            '/device/repair?id=' . (int) $f['id'], 'device_fault', (int) $f['id'], $uid);
         Audit::op($req->user, 'device', 'device_fault_cancelled', 'device', (int) $f['device_id'], $f['asset_no'] . ' ' . $f['device_name'], array('reason' => $v['reason']), $req->ip());
         return array('ok' => true);
     }

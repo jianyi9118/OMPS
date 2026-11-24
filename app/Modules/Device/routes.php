@@ -9,17 +9,18 @@ $router->post('/api/v1/collector/report', $c . 'collect', array('auth' => false,
 // everyone can report a fault (报修) from the workbench
 $router->get('/api/v1/device-faults/options', $c . 'faultOptions');
 $router->post('/api/v1/device-faults/report', $c . 'report');
+// 故障与维修: device viewers see the requests in their scope, everyone else the ones they reported
+$router->get('/device/repair', $c . 'repairPage');
+$router->get('/api/v1/device-faults', $c . 'faults');
+$router->get('/api/v1/device-faults/{id}', $c . 'fault');
 
 $router->get('/device', $c . 'legacy', array('perm' => 'device.view'));
 $router->group(array('perm' => 'device.view'), function ($r) use ($c) {
     $r->get('/device/archive', $c . 'archivePage');
     $r->get('/device/monitor', $c . 'monitorPage');
-    $r->get('/device/repair', $c . 'repairPage');
     $r->get('/api/v1/devices/meta', $c . 'meta');
     $r->get('/api/v1/devices', $c . 'index');
     $r->get('/api/v1/devices/{id}', $c . 'show');
-    $r->get('/api/v1/device-faults', $c . 'faults');
-    $r->get('/api/v1/device-faults/{id}', $c . 'fault');
     $r->get('/api/v1/device-repairs', $c . 'repairs');
     $r->get('/api/v1/device-usage', $c . 'usage');
     $r->get('/api/v1/device-anomalies', $c . 'anomalies');

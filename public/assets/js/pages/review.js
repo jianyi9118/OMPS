@@ -3,12 +3,17 @@
   "use strict";
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
-  var state = { tab: "pending", person_id: "", kw: "", page: 1 };
+  var state = { tab: "pending", person_id: "", page: 1 };
   var data = null, picked = {};
 
   function shell() {
-    view.innerHTML = '<div class="bar" id="rv_bar"></div><div class="card" id="rv_card"></div>';
+    // the bar is built once (the filters keep their input); drawBar() refreshes the tabs, people and batch actions
+    view.innerHTML = '<div class="bar" id="rv_bar"><button type="button" class="btn" data-tab="pending"></button><button type="button" class="btn" data-tab="done"></button>' +
+      '<select id="rv_person"></select><span class="sp"></span><span id="rv_acts" style="display:contents"></span></div><div class="card" id="rv_card"></div>';
     var bar = document.getElementById("rv_bar");
+    bar.insertBefore(O.filters({ state: state, onChange: load, period: t("perf.rv.submitted_at"), placeholder: t("perf.rv.search"),
+      fields: [["person", t("perf.rv.person")], ["dept", t("perf.rv.dept")], ["task", t("perf.rv.task")], ["done", t("perf.field.done")], ["problems", t("perf.label.problems")],
+        ["next", t("perf.label.next")], ["reviewer", t("perf.rv.reviewer")], ["comment", t("perf.field.comment")]] }), bar.querySelector(".sp"));
     bar.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
@@ -20,7 +25,6 @@
       if (e.target.id === "rv_person") { state.person_id = e.target.value; state.page = 1; load(); }
       if (e.target.id === "rv_all") { (data ? data.rows : []).forEach(function (r) { if (e.target.checked) picked[r.id] = true; else delete picked[r.id]; }); render(); }
     });
-    bar.addEventListener("input", O.debounce(function (e) { if (e.target.id === "rv_kw") { state.kw = e.target.value.trim(); state.page = 1; load(); } }, 350));
   }
 
   function selected() { return Object.keys(picked).map(Number); }
@@ -28,12 +32,14 @@
   function drawBar() {
     var n = selected().length, pend = state.tab === "pending";
     var all = data && data.rows.length && data.rows.every(function (r) { return picked[r.id]; });
-    document.getElementById("rv_bar").innerHTML =
-      '<button type="button" class="btn' + (pend ? " pri" : "") + '" data-tab="pending">' + O.esc(t("perf.rv.pending", { n: data ? data.pending : 0 })) + "</button>" +
-      '<button type="button" class="btn' + (pend ? "" : " pri") + '" data-tab="done">' + O.esc(t("perf.rv.done")) + "</button>" +
-      '<select id="rv_person"><option value="">' + O.esc(t("plan.all_people")) + "</option>" + (data ? data.people : []).map(function (x) {
-        return '<option value="' + x.id + '"' + (String(x.id) === String(state.person_id) ? " selected" : "") + ">" + O.esc(x.name) + "</option>"; }).join("") + "</select>" +
-      '<input type="search" id="rv_kw" placeholder="' + O.esc(t("perf.rv.search")) + '" value="' + O.esc(state.kw) + '"><span class="sp"></span>' +
+    var tp = document.querySelector('#rv_bar [data-tab="pending"]'), td = document.querySelector('#rv_bar [data-tab="done"]');
+    tp.className = "btn" + (pend ? " pri" : "");
+    tp.textContent = t("perf.rv.pending", { n: data ? data.pending : 0 });
+    td.className = "btn" + (pend ? "" : " pri");
+    td.textContent = t("perf.rv.done");
+    document.getElementById("rv_person").innerHTML = '<option value="">' + O.esc(t("plan.all_people")) + "</option>" + (data ? data.people : []).map(function (x) {
+      return '<option value="' + x.id + '"' + (String(x.id) === String(state.person_id) ? " selected" : "") + ">" + O.esc(x.name) + "</option>"; }).join("");
+    document.getElementById("rv_acts").innerHTML =
       (pend && data && data.rows.length ? '<label class="opts" style="font-size:13px"><input type="checkbox" id="rv_all" style="width:auto"' + (all ? " checked" : "") + "> " + O.esc(t("perf.rv.select_all")) + "</label>" +
         '<span class="muted">' + O.esc(t("perf.rv.picked", { n: n })) + "</span>" +
         '<button type="button" class="btn" id="rv_back"' + (n ? "" : " disabled") + ">" + O.esc(t("perf.rv.return_many")) + "</button>" +
@@ -80,7 +86,11 @@
   }
 
   function load() {
-    O.api("GET", "/api/v1/perf/reviews", null, { tab: state.tab, person_id: state.person_id, kw: state.kw, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.tab = state.tab;
+    q.person_id = state.person_id;
+    q.page = state.page;
+    O.api("GET", "/api/v1/perf/reviews", null, q).then(function (res) {
       data = res;
       var ids = {};
       res.rows.forEach(function (r) { ids[r.id] = true; });

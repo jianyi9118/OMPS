@@ -3,12 +3,21 @@
   "use strict";
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
-  var state = { type: "operation", page: 1, from: "", to: "", user: "", module: "", result: "" };
+  var state = { type: "operation", page: 1, module: "", result: "" };
 
   view.innerHTML = '<div class="subnav" style="border:1px solid var(--line);border-radius:4px" id="lg_tabs">' +
     ["operation", "audit", "login"].map(function (k) { return '<button type="button" data-tab="' + k + '">' + O.esc(t("log.tab." + k)) + "</button>"; }).join("") + "</div>" +
-    '<div class="bar"><label class="scope">' + O.esc(t("log.from")) + ' ' + O.dateInput('lg_from') + '</label><label class="scope">' + O.esc(t("log.to")) + ' ' + O.dateInput('lg_to') + '</label>' +
-    '<input type="search" id="lg_user" placeholder="' + O.esc(t("log.user")) + '"><select id="lg_module"></select><select id="lg_result" hidden></select><span class="sp"></span></div><div class="card" id="lg_card"></div>';
+    '<div class="bar" id="lg_bar"><select id="lg_module"></select><select id="lg_result" hidden></select><span class="sp"></span></div><div class="card" id="lg_card"></div>';
+
+  /* keyword fields differ by log: the filter box is redrawn when the tab changes (the period and words are kept) */
+  function drawFilters() {
+    var bar = document.getElementById("lg_bar");
+    var old = bar.querySelector(".flt");
+    if (old) bar.removeChild(old);
+    var fields = state.type === "login" ? [["user", t("log.user")], ["ip", "IP"], ["agent", t("log.agent")]] : [["user", t("log.user")], ["target", t("log.target")], ["ip", "IP"]];
+    if (state.field && !fields.some(function (f) { return f[0] === state.field; })) state.field = "";
+    bar.insertBefore(O.filters({ state: state, onChange: load, period: t("log.time"), fields: fields, placeholder: t("log.search") }), bar.firstChild);
+  }
 
   var resultSel = document.getElementById("lg_result");
   resultSel.innerHTML = '<option value="">' + O.esc(t("log.all_results")) + "</option>" + ["success", "fail", "locked", "disabled", "ip_blocked", "logout"].map(function (k) {
@@ -50,7 +59,11 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("on", tabs[i].getAttribute("data-tab") === state.type);
     document.getElementById("lg_module").hidden = state.type === "login";
     resultSel.hidden = state.type !== "login";
-    O.api("GET", "/api/v1/logs/" + state.type, null, { page: state.page, from: state.from, to: state.to, user: state.user, module: state.module, result: state.result }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.page = state.page;
+    q.module = state.module;
+    q.result = state.result;
+    O.api("GET", "/api/v1/logs/" + state.type, null, q).then(function (res) {
       var sel = document.getElementById("lg_module");
       if (state.type !== "login") {
         sel.innerHTML = '<option value="">' + O.esc(t("log.all_modules")) + "</option>" + res.modules.map(function (m) {
@@ -72,12 +85,11 @@
     state.module = "";
     state.result = "";
     resultSel.value = "";
+    drawFilters();
     load();
   });
-  document.getElementById("lg_from").addEventListener("change", function (e) { state.from = e.target.value; state.page = 1; load(); });
-  document.getElementById("lg_to").addEventListener("change", function (e) { state.to = e.target.value; state.page = 1; load(); });
-  document.getElementById("lg_user").addEventListener("input", O.debounce(function (e) { state.user = e.target.value.trim(); state.page = 1; load(); }, 350));
   document.getElementById("lg_module").addEventListener("change", function (e) { state.module = e.target.value; state.page = 1; load(); });
   resultSel.addEventListener("change", function (e) { state.result = e.target.value; state.page = 1; load(); });
+  drawFilters();
   load();
 })();

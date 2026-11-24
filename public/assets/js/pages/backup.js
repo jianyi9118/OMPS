@@ -1,4 +1,4 @@
-/* 数据备份 (phase 9): back up now, daily automatic backup, list, download, restore (password again), delete. */
+/* 数据备份 (phase 9): back up now, list, download, restore (password again), delete; the gear opens automatic backup and clean-up settings. */
 (function () {
   "use strict";
   var O = window.OMPS, t = O.t;
@@ -7,20 +7,34 @@
 
   function load() { O.api("GET", "/api/v1/backups").then(draw, O.failed); }
 
+  /* kept periods: backups in days, logs in months; 0 = for ever */
+  var KNOWN_DAYS = [7, 14, 30, 90, 180, 365, 1095, 0];
+  function dayText(n) { return n === 0 ? t("backup.forever") : t("backup.d" + n); }
+  function monthText(n) { return n === 0 ? t("backup.forever") : t("backup.m" + n); }
+  function periodSelect(id, list, cur, text) {
+    if (list.indexOf(cur) < 0) list = [cur].concat(list); // a number of days chosen before the list existed
+    return '<select class="inp" id="' + id + '" style="width:140px">' + list.map(function (n) {
+      return '<option value="' + n + '"' + (n === cur ? " selected" : "") + ">" + O.esc(text === dayText && KNOWN_DAYS.indexOf(n) < 0 ? t("backup.days_n", { n: n }) : text(n)) + "</option>"; }).join("") + "</select>";
+  }
+  /** longer = keeps more: 0 (for ever) is the longest */
+  function shorter(a, b) { return a !== 0 && (b === 0 || a < b); }
+
   function kindPill(k) { return O.pill(t("backup.kind." + k), k === "manual" ? "info" : (k === "external" ? "warn" : "")); }
+
+  function keepText(n) { return KNOWN_DAYS.indexOf(n) < 0 ? t("backup.days_n", { n: n }) : dayText(n); }
 
   function draw(d) {
     var s = d.settings;
-    view.innerHTML = '<div class="split" style="grid-template-columns:minmax(0,1fr) minmax(300px,380px)"><div class="card"><div class="card-b" style="display:grid;gap:10px">' +
-      '<div><button type="button" class="btn pri" id="bk_now">' + O.icon("db", 14) + " " + O.esc(t("backup.now")) + "</button></div>" +
+    var summary = [s.auto ? t("backup.sum_on", { time: s.time }) : t("backup.sum_off"), t("backup.sum_keep", { p: keepText(s.keep_days) }),
+      t("backup.sum_logs", { p: monthText(s.logs_months) }), t("backup.sum_audit", { p: monthText(s.audit_months) })];
+    view.innerHTML = '<div class="card"><div class="card-b" style="display:grid;gap:10px">' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="btn pri" id="bk_now">' + O.icon("db", 14) + " " + O.esc(t("backup.now")) + "</button>" +
+      '<span class="muted" style="font-size:12.5px;flex:1;min-width:200px">' + O.esc(summary.join(" · ")) + "</span>" +
+      '<button type="button" class="ib" id="bk_set" title="' + O.esc(t("backup.settings")) + '" aria-label="' + O.esc(t("backup.settings")) + '">' + O.icon("gear", 16) + "</button></div>" +
       '<div class="muted" style="font-size:12.5px">' + O.esc(t("backup.what")) + "</div>" +
       '<div style="font-size:12.5px">' + O.esc(t("backup.folder")) + ' <span class="mono">' + O.esc(d.dir) + "</span>" + (d.free !== null ? ' · ' + O.esc(t("backup.free", { size: O.fileSize(d.free) })) : "") + "</div>" +
       '<div class="note warn" style="margin:0">' + O.esc(t("backup.key_note")) + "</div></div></div>" +
-      '<div class="card"><div class="card-h">' + O.esc(t("backup.auto")) + '</div><div class="card-b" style="display:grid;gap:10px">' +
-      '<label style="display:flex;gap:8px;align-items:center"><span class="switch"><input type="checkbox" id="bk_auto"' + (s.auto ? " checked" : "") + "><span></span></span> " + O.esc(t("backup.auto_on")) + "</label>" +
-      '<div class="fld"><label>' + O.esc(t("backup.time")) + '</label><input class="inp mono" id="bk_time" maxlength="5" style="width:90px" value="' + O.esc(s.time) + '"><span class="hint">' + O.esc(t("backup.time_hint")) + "</span></div>" +
-      '<div class="fld"><label>' + O.esc(t("backup.keep_days")) + '</label><input class="inp num" id="bk_keep" style="width:90px" value="' + O.esc(String(s.keep_days)) + '"><span class="hint">' + O.esc(t("backup.keep_hint")) + "</span></div>" +
-      '<div><button type="button" class="btn" id="bk_save">' + O.esc(t("common.save")) + '</button></div></div></div></div><div class="card" id="bk_list" style="margin-top:12px"></div>';
+      '<div class="card" id="bk_list" style="margin-top:12px"></div>';
     view.querySelector("#bk_list").appendChild(O.table({
       cols: [
         { t: t("backup.col.time"), f: function (r) { return O.esc(r.at.slice(0, 16)) + " " + kindPill(r.kind) + '<div class="mono muted" style="font-size:11.5px">' + O.esc(r.name) + "</div>"; } },
@@ -52,13 +66,47 @@
       now.textContent = t("backup.working");
       O.api("POST", "/api/v1/backups", {}).then(function (r) { O.status(t("backup.done", { size: O.fileSize(r.size) })); load(); }, function (e) { O.failed(e); load(); });
     });
-    view.querySelector("#bk_save").addEventListener("click", function () {
-      O.api("PUT", "/api/v1/backups/settings", { auto: view.querySelector("#bk_auto").checked, time: view.querySelector("#bk_time").value.trim(), keep_days: +view.querySelector("#bk_keep").value })
-        .then(function (d2) { O.status(t("common.saved")); draw(d2); }, function (e) {
-          if (e && e.fields) { O.status(e.fields.time || e.fields.keep_days || e.message, "err"); return; }
-          O.failed(e);
+    view.querySelector("#bk_set").addEventListener("click", function () { settings(d); });
+  }
+
+  /* 自动备份与清理: a dialog opened from the gear button */
+  function settings(d) {
+    var s = d.settings;
+    var box = document.createElement("div");
+    box.style.display = "grid";
+    box.style.gap = "12px";
+    box.innerHTML = '<div class="card-sub" style="border:0;padding:0;margin:0">' + O.esc(t("backup.auto")) + "</div>" +
+      '<label style="display:flex;gap:8px;align-items:center"><span class="switch"><input type="checkbox" id="bk_auto"' + (s.auto ? " checked" : "") + "><span></span></span> " + O.esc(t("backup.auto_on")) + "</label>" +
+      '<div class="fgrid"><div class="fld"><label>' + O.esc(t("backup.time")) + '</label><input class="inp mono" id="bk_time" maxlength="5" style="width:90px" value="' + O.esc(s.time) + '"><span class="hint">' + O.esc(t("backup.time_hint")) + "</span></div>" +
+      '<div class="fld"><label>' + O.esc(t("backup.keep_days")) + "</label>" + periodSelect("bk_keep", d.choices.days.slice(), s.keep_days, dayText) + '<span class="hint">' + O.esc(t("backup.keep_hint")) + "</span></div></div>" +
+      '<div class="card-sub">' + O.esc(t("backup.clean")) + "</div>" +
+      '<div class="fgrid"><div class="fld"><label>' + O.esc(t("backup.logs_keep")) + "</label>" + periodSelect("bk_logs", d.choices.months.slice(), s.logs_months, monthText) + '<span class="hint">' + O.esc(t("backup.logs_hint")) + "</span></div>" +
+      '<div class="fld"><label>' + O.esc(t("backup.audit_keep")) + "</label>" + periodSelect("bk_audit", d.choices.months.slice(), s.audit_months, monthText) + '<span class="hint" id="bk_audit_hint">' + O.esc(t("backup.audit_hint")) + "</span></div></div>" +
+      '<div class="muted" style="font-size:12.5px">' + O.esc(t("backup.clean_note")) +
+      (d.sizes ? "<br>" + O.esc(t("backup.db_size", { total: O.fileSize(d.sizes.total), logs: O.fileSize(d.sizes.logs), audit: O.fileSize(d.sizes.audit) })) : "") +
+      (d.last_clean && d.last_clean.at ? "<br>" + O.esc(t("backup.last_clean", { at: String(d.last_clean.at).slice(0, 16), n: d.last_clean.rows })) : "") + "</div>";
+    function auditHint() {
+      var v = +box.querySelector("#bk_audit").value, h = box.querySelector("#bk_audit_hint");
+      h.textContent = v !== 0 && v < 12 ? t("backup.audit_short") : t("backup.audit_hint");
+      h.style.color = v !== 0 && v < 12 ? "var(--warn)" : "";
+    }
+    box.querySelector("#bk_audit").addEventListener("change", auditHint);
+    auditHint();
+    O.modal({ title: t("backup.settings"), width: 640, body: box, buttons: [{ t: t("common.cancel") }, { t: t("common.save"), cls: "pri", fn: function () {
+      var body = { auto: box.querySelector("#bk_auto").checked, time: box.querySelector("#bk_time").value.trim(), keep_days: +box.querySelector("#bk_keep").value,
+        logs_months: +box.querySelector("#bk_logs").value, audit_months: +box.querySelector("#bk_audit").value };
+      function save() {
+        return O.api("PUT", "/api/v1/backups/settings", body).then(function (d2) { O.status(t("common.saved")); draw(d2); return true; }, function (e) {
+          if (e && e.fields) { O.status(e.fields.time || e.fields.keep_days || e.fields.logs_months || e.fields.audit_months || e.message, "err"); return false; }
+          throw e;
         });
-    });
+      }
+      // a shorter period deletes what is older right away: say so first (the dialog stays open on "cancel")
+      if (shorter(body.keep_days, s.keep_days) || shorter(body.logs_months, s.logs_months) || shorter(body.audit_months, s.audit_months)) {
+        return O.confirm({ title: t("backup.shorter_title"), msg: t("backup.shorter_msg"), danger: true, ok: t("common.save") }).then(function (ok) { return ok ? save() : false; });
+      }
+      return save();
+    } }] });
   }
 
   function remove(r) {

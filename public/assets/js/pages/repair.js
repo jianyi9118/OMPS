@@ -1,18 +1,26 @@
-/* 故障与维修 (phase 6): fault reports (assign, finish, cancel) · repair records */
+/* 故障与维修 (phase 6): fault reports (assign, finish, cancel) · repair records.
+   Without device rights: only the requests I reported (opened from a notification or the to-do history). */
 (function () {
   "use strict";
   var O = window.OMPS, t = O.t, D = O.device;
   var view = document.getElementById("view");
-  var state = { tab: O.qs("tab") === "repairs" ? "repairs" : "faults", status: "active", kw: "", page: 1 };
+  var state = { tab: O.qs("tab") === "repairs" ? "repairs" : "faults", status: "active", page: 1 };
   var focusId = +O.qs("id") || 0;
   var M = null, repairers = [];
+  var mine = !O.has("device.view");
+  // reporters, and anyone opening one request from a link, see every status (the request may be closed)
+  if (mine || focusId) state.status = "";
 
   function shell() {
+    if (mine) {
+      view.innerHTML = '<div class="note">' + O.esc(t("device.rep.mine_hint")) + '</div><div id="rp_body" style="display:grid;gap:12px"></div>';
+      return;
+    }
     view.innerHTML = '<div class="subnav" style="border:1px solid var(--line);border-radius:4px" id="rp_tabs"><button type="button" data-tab="faults">' + O.esc(t("device.rep.faults")) +
       '</button><button type="button" data-tab="repairs">' + O.esc(t("device.rep.repairs")) + '</button></div><div id="rp_body" style="display:grid;gap:12px"></div>';
     document.getElementById("rp_tabs").addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("[data-tab]") : null;
-      if (b) { state.tab = b.getAttribute("data-tab"); state.page = 1; state.kw = ""; render(); }
+      if (b) { state.tab = b.getAttribute("data-tab"); state.page = 1; state.kw = ""; state.field = ""; render(); }
     });
   }
 
@@ -21,24 +29,30 @@
     for (var i = 0; i < bs.length; i++) bs[i].classList.toggle("on", bs[i].getAttribute("data-tab") === state.tab);
     var chips = state.tab === "faults" ? '<div class="chips">' + [["active", t("device.rep.f_active")], ["fixed", t("device.fault_status.fixed")], ["cancelled", t("device.fault_status.cancelled")], ["", t("device.rep.f_all")]].map(function (c) {
       return '<button type="button" class="chip' + (state.status === c[0] ? " on" : "") + '" data-st="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + "</div>" : "";
-    document.getElementById("rp_body").innerHTML = '<div class="bar">' + chips + '<input type="search" id="rp_kw" placeholder="' + O.esc(t("device.rep.search")) + '" value="' + O.esc(state.kw) + '">' +
-      '<span class="sp"></span><button type="button" class="btn" data-a="reportFault">' + O.icon("wrench", 14) + " " + O.esc(t("device.report.title")) + '</button></div><div class="card" id="rp_card"></div>';
+    document.getElementById("rp_body").innerHTML = '<div class="bar">' + chips + '<span class="sp"></span><button type="button" class="btn" data-a="reportFault">' + O.icon("wrench", 14) + " " + O.esc(t("device.report.title")) + '</button></div><div class="card" id="rp_card"></div>';
     var bar = document.querySelector("#rp_body .bar");
     bar.addEventListener("click", function (e) { var b = e.target.closest ? e.target.closest("[data-st]") : null; if (b) { state.status = b.getAttribute("data-st"); state.page = 1; render(); } });
-    document.getElementById("rp_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; load(); }, 350));
+    var fields = [["asset_no", t("device.field.asset_no")], ["device", t("device.field.name")], ["location", t("device.field.location")], ["description", t("device.fault.description")]];
+    if (state.tab === "repairs") fields = fields.concat([["repairer", t("device.fault.repairer_name")], ["result", t("device.fault.result")]]);
+    else fields.push(["cancel_reason", t("device.fault.cancel_reason")]);
+    bar.insertBefore(O.filters({ state: state, onChange: load, period: t(state.tab === "faults" ? "device.fault.reported_at" : "device.fault.fixed_at"), fields: fields,
+      placeholder: t("device.rep.search") }), bar.querySelector(".sp"));
     load();
   }
 
   function load() {
     var url = state.tab === "faults" ? "/api/v1/device-faults" : "/api/v1/device-repairs";
-    O.api("GET", url, null, { status: state.status, kw: state.kw, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.status = state.status;
+    q.page = state.page;
+    O.api("GET", url, null, q).then(function (res) {
       if (res.repairers) repairers = res.repairers;
       var card = document.getElementById("rp_card");
       if (!card) return;
       card.innerHTML = "";
       var cols = [
         { t: t("device.fault.reported_at"), f: function (f) { return '<span class="mono">' + O.esc(f.reported_at.slice(0, 16)) + "</span>"; } },
-        { t: t("device.col.device"), cls: "wrap", f: function (f) { return '<a class="lk" href="#" data-dev="' + f.device_id + '">' + O.esc(f.asset_no + " " + f.device) + "</a>" + (f.location ? '<div class="muted" style="font-size:12px">' + O.esc(f.location) + "</div>" : ""); } },
+        { t: t("device.col.device"), cls: "wrap", f: function (f) { return (mine ? O.esc(f.asset_no + " " + f.device) : '<a class="lk" href="#" data-dev="' + f.device_id + '">' + O.esc(f.asset_no + " " + f.device) + "</a>") + (f.location ? '<div class="muted" style="font-size:12px">' + O.esc(f.location) + "</div>" : ""); } },
         { t: t("device.fault.description"), cls: "wrap", f: function (f) { return O.esc(f.description.slice(0, 80)) + '<div class="muted" style="font-size:12px">' + O.esc(t("device.fault.by", { name: f.reporter })) + "</div>"; } }
       ];
       if (state.tab === "faults") {
@@ -60,7 +74,7 @@
         }, slots: 3 });
       card.appendChild(tw);
       card.appendChild(O.pager(res, function (p) { state.page = p; load(); }));
-      if (state.tab === "faults") card.insertAdjacentHTML("beforeend", O.legend([["eye", t("common.view")], ["wrench", t("device.rep.assign")], ["check", t("device.rep.finish")], ["x", t("device.rep.cancel")]]));
+      if (state.tab === "faults" && !mine) card.insertAdjacentHTML("beforeend", O.legend([["eye", t("common.view")], ["wrench", t("device.rep.assign")], ["check", t("device.rep.finish")], ["x", t("device.rep.cancel")]]));
       else card.insertAdjacentHTML("beforeend", '<div class="card-b muted" style="font-size:12.5px">' + O.esc(t("device.rep.total_cost", { cost: res.cost })) + "</div>");
       card.onclick = function (e) { var a = e.target.closest ? e.target.closest("[data-dev]") : null; if (a) { e.preventDefault(); D.detail(+a.getAttribute("data-dev"), { tab: 4 }); } };
     }, O.failed);
@@ -74,6 +88,8 @@
       el.innerHTML = '<div class="fgrid"><div class="fld"><label>' + O.esc(t("device.col.device")) + '</label><div class="ro">' + O.esc(f.asset_no + " " + f.device + (f.location ? " · " + f.location : "")) + "</div></div>" +
         '<div class="fld"><label>' + O.esc(t("device.fault.status")) + '</label><div class="ro">' + D.faultPill(f.status) + "</div></div>" +
         '<div class="fld"><label>' + O.esc(t("device.fault.reporter")) + '</label><div class="ro">' + O.esc(f.reporter + " · " + f.reported_at.slice(0, 16)) + "</div></div>" +
+        (f.closed_by ? '<div class="fld"><label>' + O.esc(t(f.status === "cancelled" ? "device.fault.cancelled_by" : "device.fault.closed_by")) + '</label><div class="ro">' +
+          O.esc(f.closed_by + (f.closed_at ? " · " + f.closed_at.slice(0, 16) : "")) + "</div></div>" : "") +
         (f.repair ? '<div class="fld"><label>' + O.esc(t("device.fault.repairer")) + '</label><div class="ro">' + O.esc(f.repair.repairer + " · " + f.repair.started_at.slice(0, 16)) + "</div></div>" : "") +
         '<div class="fld span2"><label>' + O.esc(t("device.fault.description")) + '</label><div class="ro">' + D.para(f.description) + "</div></div>" +
         (f.repair && f.repair.fixed_at ? '<div class="fld span2"><label>' + O.esc(t("device.fault.result")) + '</label><div class="ro">' + D.para(f.repair.result) +
@@ -150,7 +166,7 @@
     } }] });
   }
 
-  D.meta().then(function (m) {
+  (mine ? Promise.resolve({ caps: {} }) : D.meta()).then(function (m) {
     M = m;
     shell();
     render();

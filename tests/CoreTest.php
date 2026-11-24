@@ -47,6 +47,25 @@ class CoreTest extends TestCase
         $this->same($id, (int) $rows[0]['id']);
     }
 
+    public function testListFilters()
+    {
+        $sfx = substr(md5(uniqid('', true)), 0, 6);
+        $a = $this->dept('滤A' . $sfx);
+        $b = $this->dept('滤B' . $sfx);
+        DB::table('departments')->where('id', $a)->update(array('created_at' => '2026-01-15 08:00:00', 'remark' => '机房' . $sfx));
+        DB::table('departments')->where('id', $b)->update(array('created_at' => '2026-03-31 23:59:59'));
+        $ids = function (array $f) use ($sfx) {
+            return array_map('intval', array_column(DB::table('departments')->where('name', 'LIKE', '滤%' . $sfx)->orderBy('id')
+                ->whereFilters($f, 'created_at', array('name' => 'name', 'note' => array('remark')))->get(), 'id'));
+        };
+        $this->same(array($a, $b), $ids(array('from' => '', 'to' => '', 'kw' => '', 'field' => '')), 'no filter');
+        $this->same(array($b), $ids(array('from' => '2026-03-01', 'to' => '2026-03-31', 'kw' => '', 'field' => '')), 'the whole last day counts');
+        $this->same(array($a), $ids(array('from' => '', 'to' => '2026-01-31', 'kw' => '', 'field' => '')), 'open start');
+        $this->same(array($a), $ids(array('from' => '', 'to' => '', 'kw' => '机房', 'field' => '')), 'keyword in all fields');
+        $this->same(array(), $ids(array('from' => '', 'to' => '', 'kw' => '机房', 'field' => 'name')), 'keyword in one field');
+        $this->same(array($a), $ids(array('from' => '', 'to' => '', 'kw' => '机房', 'field' => 'unknown')), 'an unknown field searches all');
+    }
+
     public function testValidator()
     {
         Lang::setLocale('en-US');

@@ -4,7 +4,9 @@
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
   var qs = new URLSearchParams(window.location.search);
-  var state = { tab: qs.get("tab") === "review" ? 2 : 0, kw: "", dept_id: qs.get("dept_id") || "", status: "", unassigned: qs.get("unassigned") === "1" ? 1 : "", page: 1, ttype: "", tkw: "", tpage: 1, rstatus: "pending", rpage: 1 };
+  // list filters live on state; the transfer records (ts) and the review list (rs) keep their own
+  var state = { tab: qs.get("tab") === "review" ? 2 : 0, dept_id: qs.get("dept_id") || "", status: "", unassigned: qs.get("unassigned") === "1" ? 1 : "", page: 1 };
+  var ts = { type: "", page: 1 }, rs = { status: "pending", page: 1 };
   var pmeta = null;
   var meta = null;
 
@@ -41,7 +43,6 @@
     var body = document.getElementById("s_body");
     var c = meta.caps;
     body.innerHTML = '<div class="bar">' + (c.scope === "self" ? "" :
-      '<input type="search" id="s_kw" placeholder="' + O.esc(t("staff.search")) + '" value="' + O.esc(state.kw) + '">' +
       '<select id="s_dept"><option value="">' + O.esc(t("staff.all_depts")) + "</option>" + O.deptOpts(meta.depts).map(function (o) {
         return '<option value="' + o[0] + '"' + (String(o[0]) === String(state.dept_id) ? " selected" : "") + ">" + O.esc(o[1]) + "</option>";
       }).join("") + "</select>" +
@@ -52,21 +53,34 @@
       (pmeta.canExport ? '<button type="button" class="btn" id="s_export">' + O.icon("download", 14) + " " + O.esc(t("staff.export_btn")) + "</button>" : "") +
       (c.add ? '<button type="button" class="btn pri" id="s_add">' + O.icon("plus", 14) + " " + O.esc(t("staff.add")) + "</button>" : "") + "</div>" +
       (c.scope === "self" ? '<div class="note">' + O.esc(t("staff.self_note")) + "</div>" : "") + '<div class="card" id="s_card"></div>';
-    var kw = document.getElementById("s_kw");
-    if (kw) {
-      kw.addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; loadList(); }, 350));
-      document.getElementById("s_dept").addEventListener("change", function (e) { state.dept_id = e.target.value; state.page = 1; loadList(); });
+    var dept = document.getElementById("s_dept");
+    if (dept) {
+      document.getElementById("s_status").parentNode.insertBefore(O.filters({ state: state, onChange: loadList, period: t("staff.field.hire_date"), placeholder: t("staff.search"),
+        fields: [["staff_no", t("staff.field.staff_no")], ["name", t("staff.field.name")], ["dept", t("staff.field.dept")], ["position", t("staff.field.position")], ["phone", t("staff.field.phone")]] }),
+        document.querySelector("#s_body .scope"));
+      dept.addEventListener("change", function (e) { state.dept_id = e.target.value; state.page = 1; loadList(); });
       document.getElementById("s_status").addEventListener("change", function (e) { state.status = e.target.value; state.page = 1; loadList(); });
     }
     var add = document.getElementById("s_add");
     if (add) add.addEventListener("click", function () { personForm(null); });
     var exp = document.getElementById("s_export");
-    if (exp) exp.addEventListener("click", function () { window.location.href = O.url("/api/v1/staff-export", { kw: state.kw, dept_id: state.dept_id, status: state.status }); });
+    // the file holds what the list shows: same filters
+    if (exp) exp.addEventListener("click", function () {
+      var q = O.filterQuery(state);
+      q.dept_id = state.dept_id;
+      q.status = state.status;
+      window.location.href = O.url("/api/v1/staff-export", q);
+    });
     loadList();
   }
 
   function loadList() {
-    O.api("GET", "/api/v1/staff", null, { kw: state.kw, dept_id: state.dept_id, status: state.status, unassigned: state.unassigned, page: state.page }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.dept_id = state.dept_id;
+    q.status = state.status;
+    q.unassigned = state.unassigned;
+    q.page = state.page;
+    O.api("GET", "/api/v1/staff", null, q).then(function (res) {
       var c = meta.caps;
       var card = document.getElementById("s_card");
       card.innerHTML = "";
@@ -206,10 +220,13 @@
   function reviewView() {
     var body = document.getElementById("s_body");
     body.innerHTML = '<div class="bar"><select id="r_status">' + ["pending", "approved", "returned", "withdrawn"].map(function (k) {
-      return '<option value="' + k + '"' + (k === state.rstatus ? " selected" : "") + ">" + O.esc(t("review.status." + k)) + "</option>"; }).join("") +
+      return '<option value="' + k + '"' + (k === rs.status ? " selected" : "") + ">" + O.esc(t("review.status." + k)) + "</option>"; }).join("") +
       '</select><span class="muted" style="font-size:12.5px">' + O.esc(t("review.hint")) + '</span><span class="sp"></span>' +
-      (state.rstatus === "pending" ? '<button type="button" class="btn pri" id="r_batch">' + O.icon("check", 14) + " " + O.esc(t("review.approve_selected")) + "</button>" : "") + '</div><div class="card" id="r_card"></div>';
-    document.getElementById("r_status").addEventListener("change", function (e) { state.rstatus = e.target.value; state.rpage = 1; reviewView(); });
+      (rs.status === "pending" ? '<button type="button" class="btn pri" id="r_batch">' + O.icon("check", 14) + " " + O.esc(t("review.approve_selected")) + "</button>" : "") + '</div><div class="card" id="r_card"></div>';
+    var sel = document.getElementById("r_status");
+    sel.addEventListener("change", function (e) { rs.status = e.target.value; rs.page = 1; reviewView(); });
+    sel.parentNode.insertBefore(O.filters({ state: rs, onChange: loadReviews, period: t("review.submitted_at"), placeholder: t("review.search"),
+      fields: [["name", t("staff.field.name")], ["dept", t("staff.field.dept")], ["reviewer", t("review.reviewer")], ["comment", t("review.return_reason")]] }), sel.nextSibling);
     var batch = document.getElementById("r_batch");
     if (batch) batch.addEventListener("click", function () {
       var ids = Array.prototype.map.call(document.querySelectorAll("#r_card input[data-rid]:checked"), function (x) { return +x.getAttribute("data-rid"); });
@@ -220,8 +237,11 @@
   }
 
   function loadReviews() {
-    O.api("GET", "/api/v1/reviews", null, { status: state.rstatus, page: state.rpage }).then(function (res) {
-      var pending = state.rstatus === "pending";
+    var q = O.filterQuery(rs);
+    q.status = rs.status;
+    q.page = rs.page;
+    O.api("GET", "/api/v1/reviews", null, q).then(function (res) {
+      var pending = rs.status === "pending";
       var card = document.getElementById("r_card");
       card.innerHTML = "";
       var cols = [];
@@ -236,7 +256,7 @@
           return [{ icon: "check", tip: t("review.approve"), pri: true, fn: function () { approve([r.id]); } }, { icon: "back", tip: t("review.return"), danger: true, fn: returnOne }];
         } : null
       }));
-      card.appendChild(O.pager(res, function (p) { state.rpage = p; loadReviews(); }));
+      card.appendChild(O.pager(res, function (p) { rs.page = p; loadReviews(); }));
       if (pending) card.insertAdjacentHTML("beforeend", O.legend([["check", t("review.approve")], ["back", t("review.return")]]));
     }, O.failed);
   }
@@ -314,16 +334,21 @@
   /* ---------- transfers ---------- */
   function transfersView() {
     var body = document.getElementById("s_body");
-    body.innerHTML = '<div class="bar"><input type="search" id="t_kw" placeholder="' + O.esc(t("staff.field.name")) + '" value="' + O.esc(state.tkw) + '"><select id="t_type"><option value="">' + O.esc(t("staff.all_types")) + "</option>" +
-      ["join", "transfer", "promote", "move_out", "leave", "retire"].map(function (k) { return '<option value="' + k + '"' + (k === state.ttype ? " selected" : "") + ">" + O.esc(t("staff.change." + k)) + "</option>"; }).join("") +
+    body.innerHTML = '<div class="bar"><select id="t_type"><option value="">' + O.esc(t("staff.all_types")) + "</option>" +
+      ["join", "transfer", "promote", "move_out", "leave", "retire"].map(function (k) { return '<option value="' + k + '"' + (k === ts.type ? " selected" : "") + ">" + O.esc(t("staff.change." + k)) + "</option>"; }).join("") +
       '</select></div><div class="card" id="t_card"></div>';
-    document.getElementById("t_kw").addEventListener("input", O.debounce(function (e) { state.tkw = e.target.value.trim(); state.tpage = 1; loadTransfers(); }, 350));
-    document.getElementById("t_type").addEventListener("change", function (e) { state.ttype = e.target.value; state.tpage = 1; loadTransfers(); });
+    document.getElementById("t_type").addEventListener("change", function (e) { ts.type = e.target.value; ts.page = 1; loadTransfers(); });
+    document.querySelector("#s_body .bar").appendChild(O.filters({ state: ts, onChange: loadTransfers, period: t("staff.field.date"), placeholder: t("staff.transfer_search"),
+      fields: [["name", t("staff.field.name")], ["from_dept", t("staff.field.from_dept")], ["to_dept", t("staff.field.to_dept")], ["position", t("staff.field.position")],
+        ["by", t("staff.field.by")], ["note", t("staff.field.note")]] }));
     loadTransfers();
   }
 
   function loadTransfers() {
-    O.api("GET", "/api/v1/staff/transfers", null, { kw: state.tkw, type: state.ttype, page: state.tpage }).then(function (res) {
+    var q = O.filterQuery(ts);
+    q.type = ts.type;
+    q.page = ts.page;
+    O.api("GET", "/api/v1/staff/transfers", null, q).then(function (res) {
       var card = document.getElementById("t_card");
       card.innerHTML = "";
       card.appendChild(O.table({
@@ -339,7 +364,7 @@
         ],
         rows: res.rows
       }));
-      card.appendChild(O.pager(res, function (p) { state.tpage = p; loadTransfers(); }));
+      card.appendChild(O.pager(res, function (p) { ts.page = p; loadTransfers(); }));
     }, O.failed);
   }
 

@@ -1,4 +1,4 @@
-/* System settings (super admin) */
+/* System settings (super admin): one form at full width; the section bar on top scrolls to each part */
 (function () {
   "use strict";
   var O = window.OMPS, t = O.t;
@@ -25,12 +25,42 @@
         return '<label style="margin-right:12px"><input type="checkbox" data-wd="' + d + '" style="width:auto"' + (s.work_days.indexOf(d) >= 0 ? " checked" : "") + "> " + O.esc(t("common.wd" + (d % 7))) + "</label>";
       }).join("") + '<div class="hint">' + O.esc(t("settings.work_hint")) + "</div>" }
     ], s);
+    /* a bar of the sections (stays at the top while scrolling; the save button lives there too) and the form at full width */
+    var nav = document.createElement("div");
+    nav.className = "set-nav";
     var card = document.createElement("div");
-    card.className = "card";
-    card.style.maxWidth = "820px";
-    card.innerHTML = '<div class="card-h">' + O.esc(t("menu.settings")) + '</div><div class="card-b"></div><div class="d-f" style="border-top:1px solid var(--line)"><button type="button" class="btn pri" id="s_save">' + O.esc(t("common.save")) + "</button></div>";
+    card.className = "card set-form";
+    card.innerHTML = '<div class="card-b"></div>';
     card.querySelector(".card-b").appendChild(f.el);
+    view.appendChild(nav);
     view.appendChild(card);
+    var groups = Array.prototype.slice.call(card.querySelectorAll(".gtitle"));
+    nav.innerHTML = '<div class="subnav" role="tablist">' + groups.map(function (g, i) {
+      return '<button type="button" data-sec="' + i + '">' + O.esc(g.textContent) + "</button>"; }).join("") +
+      '<span class="sp"></span><button type="button" class="btn pri" id="s_save">' + O.esc(t("common.save")) + "</button></div>";
+    var scroller = view.closest(".content") || document.scrollingElement;
+    var tabs = nav.querySelectorAll("[data-sec]");
+    function mark(i) { for (var k = 0; k < tabs.length; k++) tabs[k].classList.toggle("on", k === i); }
+    function spy() {
+      var top = nav.getBoundingClientRect().bottom + 12, cur = 0;
+      groups.forEach(function (g, i) { if (g.getBoundingClientRect().top <= top) cur = i; });
+      // at the very bottom the last (short) section cannot reach the top: it is the one in view
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) cur = groups.length - 1;
+      mark(cur);
+    }
+    var lock = 0;
+    nav.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-sec]") : null;
+      if (!b) return;
+      var g = groups[+b.getAttribute("data-sec")];
+      mark(+b.getAttribute("data-sec"));
+      lock = Date.now();
+      // scroll only the content area (scrollIntoView would also move the page frame)
+      var y = scroller.scrollTop + g.getBoundingClientRect().top - nav.getBoundingClientRect().bottom - 10;
+      if (scroller.scrollTo) scroller.scrollTo({ top: Math.max(0, y), behavior: "smooth" }); else scroller.scrollTop = Math.max(0, y);
+    });
+    scroller.addEventListener("scroll", function () { if (Date.now() - lock > 700) spy(); });
+    mark(0);
     document.getElementById("s_save").addEventListener("click", function () {
       var v = f.values();
       v.work_days = Array.prototype.map.call(card.querySelectorAll("input[data-wd]:checked"), function (i) { return +i.getAttribute("data-wd"); });

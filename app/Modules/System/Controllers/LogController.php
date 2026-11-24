@@ -27,17 +27,10 @@ class LogController extends Controller
         }
         list($page, $size) = $this->pageArgs($req);
         $q = DB::table($tables[$type]);
-        $from = $req->str('from');
-        $to = $req->str('to');
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
-            $q->where('created_at', '>=', $from . ' 00:00:00');
-        }
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
-            $q->where('created_at', '<=', $to . ' 23:59:59');
-        }
-        if ($req->str('user') !== '') {
-            $q->whereLikeAny(array('username'), $req->str('user'));
-        }
+        // period on the log time; keyword in the fields the list shows (the login log adds the browser)
+        $search = $type === 'login' ? array('user' => 'username', 'ip' => 'ip', 'agent' => 'user_agent')
+            : array('user' => 'username', 'target' => 'target_label', 'ip' => 'ip');
+        $q->whereFilters($this->filterArgs($req), 'created_at', $search);
         if ($type !== 'login' && $req->str('module') !== '') {
             $q->where('module', $req->str('module'));
         }

@@ -4,55 +4,83 @@
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
   var meta = null;
-  var state = { box: O.qs("tab") === "inbox" ? "inbox" : "mine", filter: "", kw: "", id: +O.qs("id") || 0 };
-  var list = [], cur = null, dirty = false, focusId = state.id;
+  var state = { box: O.qs("tab") === "inbox" ? "inbox" : "mine", filter: "", page: 1, id: +O.qs("id") || 0 };
+  var list = [], lastRes = null, headKey = "", cur = null, dirty = false, focusId = state.id;
 
   var PILL = { private: "", submitted: "warn", read: "ok" };
   function statusPill(st, inbox) { return O.pill(t((inbox ? "note.in_status." : "note.status.") + st), PILL[st]); }
   function para(s) { return O.esc(s || "").replace(/\n/g, "<br>"); }
 
   function shell() {
-    view.innerHTML = '<div class="nb"><div class="card nbl" id="nb_l"></div><div class="card" id="nb_r"></div></div>';
+    view.innerHTML = '<div class="nb"><div class="card nbl" id="nb_l"><div id="nb_head"></div><div id="nb_ls"></div></div><div class="card" id="nb_r"></div></div>';
     var l = document.getElementById("nb_l");
     l.addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("button") : null;
       if (!b) return;
-      if (b.hasAttribute("data-box")) { leave().then(function () { state.box = b.getAttribute("data-box"); state.filter = ""; state.id = 0; cur = null; loadList(); }); }
-      else if (b.hasAttribute("data-f")) { state.filter = b.getAttribute("data-f"); loadList(); }
+      if (b.hasAttribute("data-box")) {
+        leave().then(function () {
+          state.box = b.getAttribute("data-box"); state.filter = ""; state.id = 0; cur = null;
+          // the other box has other fields and dates: start it unfiltered
+          state.period = "all"; state.from = ""; state.to = ""; state.kw = ""; state.field = ""; state.page = 1;
+          loadList();
+        });
+      }
+      else if (b.hasAttribute("data-f")) { state.filter = b.getAttribute("data-f"); state.page = 1; loadList(); }
       else if (b.hasAttribute("data-id")) { var id = +b.getAttribute("data-id"); if (!cur || cur.id !== id) leave().then(function () { open(id); }); }
       else if (b.id === "nb_new") { leave().then(newNote); }
     });
-    l.addEventListener("input", O.debounce(function (e) { if (e.target.id === "nb_kw") { state.kw = e.target.value.trim(); loadList(); } }, 350));
   }
 
-  function drawLeft() {
-    var l = document.getElementById("nb_l");
+  /* the head (boxes, chips, filters) is drawn again only when the box or the unread count changes, so the search box keeps its focus */
+  function drawHead() {
     var inbox = state.box === "inbox";
+    var key = state.box + "|" + (meta.inbox ? meta.inbox_unread : "");
+    if (key === headKey && document.querySelector("#nb_head .bar")) return;
+    headKey = key;
     var chips = inbox ? [["", t("note.f.all")], ["unread", t("note.f.unread")]] : [["", t("note.f.all")], ["private", t("note.f.private")], ["submitted", t("note.f.submitted")]];
-    l.innerHTML = (meta.inbox ? '<div class="subnav" style="border-bottom:1px solid var(--line-2)">' +
+    var h = document.getElementById("nb_head");
+    h.innerHTML = (meta.inbox ? '<div class="subnav" style="border-bottom:1px solid var(--line-2)">' +
         '<button type="button" data-box="mine" class="' + (inbox ? "" : "on") + '">' + O.esc(t("note.box.mine")) + "</button>" +
         '<button type="button" data-box="inbox" class="' + (inbox ? "on" : "") + '">' + O.esc(t("note.box.inbox")) + (meta.inbox_unread ? " (" + meta.inbox_unread + ")" : "") + "</button></div>" : "") +
       '<div class="bar" style="display:grid;gap:8px">' +
-      '<div style="display:flex;gap:8px;align-items:center">' + (meta.inbox ? "" : '<b style="flex:1">' + O.esc(t("note.box.mine")) + "</b>") +
-        '<input type="search" id="nb_kw" style="flex:1;min-width:0" placeholder="' + O.esc(t("note.search")) + '" value="' + O.esc(state.kw) + '">' +
-        (inbox ? "" : '<button type="button" class="btn sm pri" id="nb_new">' + O.icon("plus", 14) + " " + O.esc(t("note.new")) + "</button>") + "</div>" +
-      '<div class="chips">' + chips.map(function (c) { return '<button type="button" class="chip' + (state.filter === c[0] ? " on" : "") + '" data-f="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + "</div></div>" +
-      '<div class="nbls" id="nb_list">' + (list.length ? list.map(function (n) {
+      (inbox ? "" : '<div style="display:flex;gap:8px;align-items:center"><b style="flex:1">' + (meta.inbox ? "" : O.esc(t("note.box.mine"))) + "</b>" +
+        '<button type="button" class="btn sm pri" id="nb_new">' + O.icon("plus", 14) + " " + O.esc(t("note.new")) + "</button></div>") +
+      '<div class="chips">' + chips.map(function (c) { return '<button type="button" class="chip" data-f="' + c[0] + '">' + O.esc(c[1]) + "</button>"; }).join("") + "</div></div>";
+    var fields = [["title", t("note.field.title")], ["body", t("note.field.body")], ["reply", t("note.field.reply")]];
+    if (inbox) fields.splice(2, 0, ["owner", t("note.col.owner")]);
+    h.querySelector(".bar").appendChild(O.filters({ state: state, onChange: loadList, compact: true, period: t(inbox ? "note.col.submitted_at" : "note.col.updated_at"), fields: fields,
+      placeholder: t("note.search") }));
+  }
+
+  function drawLeft() {
+    drawHead();
+    var inbox = state.box === "inbox";
+    var cs = document.querySelectorAll("#nb_head [data-f]");
+    for (var i = 0; i < cs.length; i++) cs[i].classList.toggle("on", cs[i].getAttribute("data-f") === state.filter);
+    var l = document.getElementById("nb_ls");
+    var filtered = state.kw || state.from || state.to;
+    l.innerHTML = '<div class="nbls" id="nb_list">' + (list.length ? list.map(function (n) {
         var sub = inbox ? t("note.from", { name: n.owner }) + " · " + n.submitted_at.slice(5, 16) : (n.snippet || t("note.no_body")) ;
         return '<button type="button" class="nbi' + (cur && cur.id === n.id ? " on" : "") + '" data-id="' + n.id + '"><div class="nbi-h"><b>' + (inbox && n.status === "submitted" ? '<span class="udot"></span>' : "") +
           O.esc(n.title) + "</b>" + statusPill(n.status, inbox) + '</div><div class="nbi-s">' + O.esc(sub) + '</div><div class="nbi-m">' + O.esc(inbox ? (n.read_at ? t("note.read_at", { at: n.read_at.slice(5, 16) }) : "") : n.updated_at.slice(5, 16)) + "</div></button>";
-      }).join("") : '<div class="card-b muted">' + O.esc(t(inbox ? "note.inbox_empty" : "note.empty")) + "</div>") + "</div>";
+      }).join("") : '<div class="card-b muted">' + O.esc(t(filtered ? "note.none_found" : inbox ? "note.inbox_empty" : "note.empty")) + "</div>") + "</div>";
+    if (lastRes) l.appendChild(O.pager(lastRes, function (p) { state.page = p; loadList(); }));
   }
 
   function loadList() {
-    return O.api("GET", "/api/v1/notes", null, { box: state.box, filter: state.filter, kw: state.kw }).then(function (res) {
+    var q = O.filterQuery(state);
+    q.box = state.box;
+    q.filter = state.filter;
+    q.page = state.page;
+    return O.api("GET", "/api/v1/notes", null, q).then(function (res) {
       list = res.rows;
+      lastRes = res;
       drawLeft();
       if (!cur) {
         if (state.id) { open(state.id); state.id = 0; }
         else if (list.length && state.box === "mine") open(list[0].id);
-        else if (state.box === "mine") newNote();
-        else document.getElementById("nb_r").innerHTML = '<div class="card-b muted">' + O.esc(t(list.length ? "note.pick" : "note.inbox_empty")) + "</div>";
+        else if (state.box === "mine" && !(state.kw || state.from || state.to)) newNote();
+        else document.getElementById("nb_r").innerHTML = '<div class="card-b muted">' + O.esc(t(list.length ? "note.pick" : state.kw || state.from || state.to ? "note.none_found" : "note.inbox_empty")) + "</div>";
       }
     }, O.failed);
   }
@@ -184,7 +212,7 @@
       O.api("POST", "/api/v1/notes/" + n.id + "/withdraw", {}).then(function () { O.status(t("note.withdrawn")); cur = null; loadList().then(function () { open(n.id); }); }, O.failed);
     });
     if ((b = document.getElementById("nv_copy"))) b.addEventListener("click", function () {
-      O.api("POST", "/api/v1/notes/" + n.id + "/copy", {}).then(function (x) { O.status(t("note.copied")); state.filter = ""; cur = null; loadList().then(function () { open(x.id); }); }, O.failed);
+      O.api("POST", "/api/v1/notes/" + n.id + "/copy", {}).then(function (x) { O.status(t("note.copied")); state.filter = ""; state.page = 1; cur = null; loadList().then(function () { open(x.id); }); }, O.failed);
     });
     if ((b = document.getElementById("nv_read"))) b.addEventListener("click", function () {
       O.api("POST", "/api/v1/notes/" + n.id + "/read", { reply: document.getElementById("nv_reply").value }).then(function () {
@@ -197,7 +225,7 @@
     return O.api("GET", "/api/v1/notes/" + id).then(function (n) {
       var want = n.mine ? "mine" : "inbox", switched = state.box !== want;
       state.box = want;
-      if (switched) state.filter = "";
+      if (switched) { state.filter = ""; state.period = "all"; state.from = ""; state.to = ""; state.kw = ""; state.field = ""; state.page = 1; }
       if (n.caps.edit) editor(n); else viewer(n);
       return (switched ? loadList() : Promise.resolve(drawLeft())).then(function () {
         if (focusId !== n.id) return;

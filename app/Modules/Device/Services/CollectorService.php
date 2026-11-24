@@ -26,17 +26,20 @@ use Omps\Engines\Permission;
  */
 class CollectorService
 {
-    const ITEMS = array('computer_name', 'os', 'cpu', 'memory', 'disk', 'board', 'monitor', 'nic');
-    const PART_ITEMS = array('cpu', 'memory', 'disk', 'board', 'monitor', 'nic');
+    const ITEMS = array('computer_name', 'os', 'cpu', 'memory', 'disk', 'board', 'monitor', 'nic', 'keyboard', 'mouse');
+    /** Ticked until a device admin saves the scope; keyboard and mouse are opt-in. */
+    const DEFAULT_ITEMS = array('computer_name', 'os', 'cpu', 'memory', 'disk', 'board', 'monitor', 'nic');
+    const PART_ITEMS = array('cpu', 'memory', 'disk', 'board', 'monitor', 'nic', 'keyboard', 'mouse');
     const CLIENT_FILES = array('install.cmd', 'omps-collector.ps1', 'uninstall.cmd', 'readme.txt');
-    const CLIENT_VERSION = '1.0';
+    /** Clients older than this do not collect keyboards and mice: the list marks them for an update. */
+    const CLIENT_VERSION = '1.1';
 
-    /** Items the clients may collect (system setting, all by default). */
+    /** Items the clients may collect (system setting, DEFAULT_ITEMS until saved). */
     public static function scope()
     {
         $v = Settings::get('collect_scope', null);
         if (!is_array($v)) {
-            return self::ITEMS;
+            return self::DEFAULT_ITEMS;
         }
         return array_values(array_intersect(self::ITEMS, $v));
     }
@@ -64,6 +67,7 @@ class CollectorService
         return array('id' => (int) $c['id'], 'device_id' => (int) $c['device_id'], 'status' => (string) $c['status'], 'computer_name' => str_or_empty($c['computer_name']),
             'os' => str_or_empty($c['os']), 'version' => str_or_empty($c['client_version']), 'registered_at' => str_or_empty($c['registered_at']),
             'last_seen' => str_or_empty($c['last_seen']), 'last_ip' => str_or_empty($c['last_ip']), 'enroll_expires' => str_or_empty($c['enroll_expires']),
+            'outdated' => (string) $c['status'] === 'active' && (string) $c['client_version'] !== '' && version_compare((string) $c['client_version'], self::CLIENT_VERSION, '<'),
             'asset_no' => isset($c['asset_no']) ? (string) $c['asset_no'] : '', 'device' => isset($c['device_name']) ? (string) $c['device_name'] : '');
     }
 
@@ -83,13 +87,18 @@ class CollectorService
         }
     }
 
-    public static function index(Request $req, $status, $page, $size)
+    /** Keyword fields of the client list (the browser offers the same keys). */
+    const SEARCH_CLIENTS = array('asset_no' => 'd.asset_no', 'device' => 'd.name', 'computer' => 'c.computer_name', 'os' => 'c.os', 'version' => 'c.client_version', 'ip' => 'c.last_ip');
+
+    /** $f = list filters (period on the last report time). */
+    public static function index(Request $req, $status, array $f, $page, $size)
     {
         self::need($req, 'view');
         $q = DB::table('device_collectors c')->join('devices d', 'd.id', '=', 'c.device_id')->whereNull('d.deleted_at')
             ->select(array('c.*', 'd.asset_no', 'd.name as device_name'));
         DeviceService::scopeQuery($q, $req->user, 'd');
         $q->where('c.status', in_array($status, array('pending', 'active', 'revoked'), true) ? $status : 'active');
+        $q->whereFilters($f, 'c.last_seen', self::SEARCH_CLIENTS);
         $res = $q->orderBy('d.asset_no')->orderBy('c.id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentCollector'), $res['rows']);
         return $res;
@@ -239,7 +248,8 @@ class CollectorService
         $compare = $changed || $partsEdited;
         $computer = isset($data['computer_name']) ? $data['computer_name'] : $c['computer_name'];
         $anomaly = null;
-        DB::transaction(function () use ($c, $d, $req, $event, $data, $json, $hash, $changed, $compare, $computer, $scope, &$anomaly) {
+        $prev = $last ? json_decode((string) $last['data'], true) : null;
+        DB::transaction(function () use ($c, $d, $req, $event, $data, $json, $hash, $changed, $compare, $computer, $scope, $prev, &$anomaly) {
             DB::table('device_collectors')->where('id', (int) $c['id'])->update(array('last_seen' => now(), 'last_ip' => $req->ip(), 'computer_name' => $computer,
                 'os' => isset($data['os']) ? $data['os'] : $c['os'], 'client_version' => self::clip($req->str('version'), 20)));
             DB::table('device_usage_logs')->insert(array('device_id' => (int) $d['id'], 'collector_id' => (int) $c['id'], 'event' => $event, 'ip' => $req->ip(),
@@ -248,7 +258,7 @@ class CollectorService
                 return;
             }
             $sid = DB::table('device_hw_snapshots')->insert(array('collector_id' => (int) $c['id'], 'device_id' => (int) $d['id'], 'collected_at' => now(), 'data' => $json, 'data_hash' => $hash));
-            $anomaly = self::compare($d, $sid, $data, $scope);
+            $anomaly = self::compare($d, $sid, $data, $scope, is_array($prev) ? $prev : null);
             // parts history written by this comparison must not count as a later manual edit
             DB::table('device_hw_snapshots')->where('id', (int) $sid)->update(array('collected_at' => now()));
         });
@@ -260,22 +270,32 @@ class CollectorService
         return array('ok' => true, 'changed' => $changed, 'scope' => $scope);
     }
 
-    /** Compare a new snapshot with the parts in use; returns [anomaly id, added, removed] or null. */
-    private static function compare(array $d, $snapshotId, array $data, array $scope)
+    /**
+     * Compare a new snapshot with the parts in use; returns [anomaly id, added, removed] or null.
+     * $prev = the previous snapshot: a part type it did not contain (newly added to the scope, or a
+     * client updated to collect it) is registered as found instead of being reported as a change.
+     */
+    private static function compare(array $d, $snapshotId, array $data, array $scope, $prev = null)
     {
         $types = array_values(array_intersect(self::PART_ITEMS, $scope));
+        $regs = $types ? DB::table('device_components')->where('device_id', (int) $d['id'])->whereNull('removed_on')->whereIn('ctype', $types)->get() : array();
+        $hasRegs = array();
+        foreach ($regs as $r) {
+            $hasRegs[(string) $r['ctype']] = true;
+        }
         $seen = array();
         foreach ($types as $t) {
+            // first report of the device, or the first one that carries this type: the parts found become its parts
+            $first = !$regs || ($prev !== null && !array_key_exists($t, $prev) && array_key_exists($t, $data) && empty($hasRegs[$t]));
             foreach (isset($data[$t]) ? $data[$t] : array() as $it) {
-                $seen[] = array('ctype' => $t, 'model' => $it['model'], 'serial_no' => $it['serial_no'], 'spec' => $it['spec']);
+                if ($first) {
+                    DeviceService::installPart((int) $d['id'], $t, $it['model'], $it['serial_no'], $it['spec'], date('Y-m-d'), 'collector', null, null);
+                } else {
+                    $seen[] = array('ctype' => $t, 'model' => $it['model'], 'serial_no' => $it['serial_no'], 'spec' => $it['spec']);
+                }
             }
         }
-        $regs = $types ? DB::table('device_components')->where('device_id', (int) $d['id'])->whereNull('removed_on')->whereIn('ctype', $types)->get() : array();
         if (!$regs) {
-            // first report: the parts found become the device's parts list
-            foreach ($seen as $s) {
-                DeviceService::installPart((int) $d['id'], $s['ctype'], $s['model'], $s['serial_no'], $s['spec'], date('Y-m-d'), 'collector', null, null);
-            }
             return null;
         }
         $pool = array();
@@ -327,7 +347,11 @@ class CollectorService
         return $q;
     }
 
-    public static function anomalies(Request $req, $status, $page, $size)
+    /** Keyword fields of the anomaly list; 'changes' looks in the parts found (type, model, serial, spec). */
+    const SEARCH_ANOMALIES = array('asset_no' => 'd.asset_no', 'device' => 'd.name', 'changes' => 'a.diff', 'handler' => 'u.display_name', 'note' => 'a.note');
+
+    /** $f = list filters (period on the time the change was found). */
+    public static function anomalies(Request $req, $status, array $f, $page, $size)
     {
         self::need($req, 'view');
         $q = self::anomalyBase($req);
@@ -336,6 +360,7 @@ class CollectorService
         } else {
             $q->where('a.status', 'pending');
         }
+        $q->whereFilters($f, 'a.created_at', self::SEARCH_ANOMALIES);
         $res = $q->orderBy('a.id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentAnomaly'), $res['rows']);
         $res['pending'] = self::anomalyBase($req)->where('a.status', 'pending')->count();
@@ -401,7 +426,11 @@ class CollectorService
         return array('ok' => true);
     }
 
-    public static function usage(Request $req, $kw, $deviceId, $page, $size)
+    /** Keyword fields of the usage records (the browser offers the same keys). */
+    const SEARCH_USAGE = array('asset_no' => 'd.asset_no', 'device' => 'd.name', 'computer' => 'l.computer_name', 'ip' => 'l.ip');
+
+    /** $f = list filters (period on the record time). */
+    public static function usage(Request $req, array $f, $deviceId, $page, $size)
     {
         self::need($req, 'view');
         $q = DB::table('device_usage_logs l')->join('devices d', 'd.id', '=', 'l.device_id')->whereNull('d.deleted_at')
@@ -410,9 +439,7 @@ class CollectorService
         if ($deviceId) {
             $q->where('l.device_id', (int) $deviceId);
         }
-        if ($kw !== '') {
-            $q->whereLikeAny(array('d.asset_no', 'd.name', 'l.computer_name', 'l.ip'), $kw);
-        }
+        $q->whereFilters($f, 'l.created_at', self::SEARCH_USAGE);
         $res = $q->orderBy('l.id', 'DESC')->paginate($page, $size);
         $rows = array();
         foreach ($res['rows'] as $l) {

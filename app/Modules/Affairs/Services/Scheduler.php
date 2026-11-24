@@ -60,6 +60,14 @@ class Scheduler
             if ($source === 'cli') {
                 Settings::set('scheduler_last_cli', now());
             }
+            // the daily clean-up of old logs rides on the same run (task or pages), real time only
+            if ($now === null) {
+                try {
+                    \Omps\Engines\Retention::runIfDue();
+                } catch (\Exception $e) {
+                    \Omps\Core\Logger::error('retention: ' . $e->getMessage());
+                }
+            }
             return $res;
         } finally {
             flock($fh, LOCK_UN);

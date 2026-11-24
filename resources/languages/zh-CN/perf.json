@@ -75,6 +75,8 @@
   "perf.rv.return_many": "批量退回",
   "perf.rv.person": "提交人",
   "perf.rv.task": "任务",
+  "perf.rv.dept": "部门",
+  "perf.rv.reviewer": "审核人",
   "perf.rv.summary": "业绩摘要",
   "perf.rv.files": "附件 {n}",
   "perf.rv.submitted_at": "提交时间",

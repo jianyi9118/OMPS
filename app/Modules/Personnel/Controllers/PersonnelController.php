@@ -183,7 +183,7 @@ class PersonnelController extends Controller
     public function myRequests(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return ChangeRequests::mine($req, $page, $size);
+        return ChangeRequests::mine($req, $this->filterArgs($req), $page, $size);
     }
 
     public function withdraw(Request $req)
@@ -196,7 +196,7 @@ class PersonnelController extends Controller
     public function reviews(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return ChangeRequests::reviewable($req, $req->str('status', 'pending'), $page, $size);
+        return ChangeRequests::reviewable($req, $req->str('status', 'pending'), $this->filterArgs($req), $page, $size);
     }
 
     public function approve(Request $req)
@@ -220,7 +220,7 @@ class PersonnelController extends Controller
     public function family(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return FamilyService::search($req, array('kw' => $req->str('kw'), 'dept_id' => $req->int('dept_id')), $page, $size);
+        return FamilyService::search($req, array_merge($this->filterArgs($req), array('dept_id' => $req->int('dept_id'))), $page, $size);
     }
 
     // ---------- import / export ----------
@@ -252,6 +252,6 @@ class PersonnelController extends Controller
 
     public function export(Request $req)
     {
-        return ImportExport::export($req, array('kw' => $req->str('kw'), 'dept_id' => $req->int('dept_id'), 'status' => $req->str('status')));
+        return ImportExport::export($req, array_merge($this->filterArgs($req), array('dept_id' => $req->int('dept_id'), 'status' => $req->str('status'))));
     }
 }

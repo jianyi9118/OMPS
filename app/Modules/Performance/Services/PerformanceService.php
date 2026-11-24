@@ -647,7 +647,12 @@ class PerformanceService
         return $q->count();
     }
 
-    public static function reviews(Request $req, $tab, $personId, $kw, $page, $size)
+    /** Keyword fields of the review list (the browser offers the same keys). */
+    const REVIEW_SEARCH = array('person' => 'pp.name', 'dept' => 'd.name', 'task' => 'p.title', 'done' => array('r.done_content', 'r.appr_content'),
+        'problems' => array('r.problems', 'r.appr_problems'), 'next' => array('r.next_steps', 'r.appr_next'), 'reviewer' => 'ru.display_name', 'comment' => 'r.review_comment');
+
+    /** $f = list filters (period on the submitted time). */
+    public static function reviews(Request $req, $tab, $personId, array $f, $page, $size)
     {
         $q = self::scoped($req);
         if ($tab === 'done') {
@@ -658,9 +663,7 @@ class PerformanceService
         if ($personId) {
             $q->where('r.person_id', (int) $personId);
         }
-        if ($kw !== '') {
-            $q->whereLikeAny(array('p.title', 'r.done_content', 'pp.name'), $kw);
-        }
+        $q->whereFilters($f, 'r.submitted_at', self::REVIEW_SEARCH);
         $q->orderBy($tab === 'done' ? 'r.reviewed_at' : 'r.submitted_at', $tab === 'done' ? 'DESC' : 'ASC')->orderBy('r.id');
         $res = $q->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'presentReview'), $res['rows']);

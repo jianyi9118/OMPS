@@ -40,7 +40,7 @@ class DeviceController extends Controller
 
     private function filters(Request $req)
     {
-        return array('kw' => $req->str('kw'), 'category' => $req->str('category'), 'status' => $req->str('status'), 'dept_id' => $req->int('dept_id'));
+        return array_merge($this->filterArgs($req), array('category' => $req->str('category'), 'status' => $req->str('status'), 'dept_id' => $req->int('dept_id')));
     }
 
     public function index(Request $req)
@@ -144,7 +144,7 @@ class DeviceController extends Controller
     public function faults(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return RepairService::index($req, $req->str('status'), $req->str('kw'), $page, $size);
+        return RepairService::index($req, $req->str('status'), $this->filterArgs($req), $page, $size);
     }
 
     public function fault(Request $req)
@@ -170,20 +170,20 @@ class DeviceController extends Controller
     public function repairs(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return RepairService::repairs($req, $req->str('kw'), $page, $size);
+        return RepairService::repairs($req, $this->filterArgs($req), $page, $size);
     }
 
     // ---------- monitoring ----------
     public function usage(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return CollectorService::usage($req, $req->str('kw'), $req->int('device_id'), $page, $size);
+        return CollectorService::usage($req, $this->filterArgs($req), $req->int('device_id'), $page, $size);
     }
 
     public function anomalies(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return CollectorService::anomalies($req, $req->str('status'), $page, $size);
+        return CollectorService::anomalies($req, $req->str('status'), $this->filterArgs($req), $page, $size);
     }
 
     public function confirm(Request $req)
@@ -199,7 +199,7 @@ class DeviceController extends Controller
     public function collectors(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return CollectorService::index($req, $req->str('status'), $page, $size);
+        return CollectorService::index($req, $req->str('status'), $this->filterArgs($req), $page, $size);
     }
 
     public function enroll(Request $req)

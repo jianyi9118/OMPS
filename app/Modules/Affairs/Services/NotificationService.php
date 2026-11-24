@@ -45,12 +45,17 @@ class NotificationService
             'popup' => self::prefs($uid)['popup'] === '1');
     }
 
-    public static function index(Request $req, $tab, $page, $size)
+    /**
+     * $f = list filters: period on the time the message was sent; the keyword is looked for in the
+     * message's values (names, titles…), which is what the text shows besides the fixed wording.
+     */
+    public static function index(Request $req, $tab, array $f, $page, $size)
     {
         $q = DB::table('notifications')->where('user_id', $req->userId());
         if ($tab === 'unread') {
             $q->whereNull('read_at');
         }
+        $q->whereFilters($f, 'created_at', array('text' => 'params'));
         $res = $q->orderBy('id', 'DESC')->paginate($page, $size);
         $res['rows'] = array_map(array(__CLASS__, 'present'), $res['rows']);
         $res['unread'] = self::unread($req->userId());

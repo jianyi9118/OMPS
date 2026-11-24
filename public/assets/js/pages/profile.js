@@ -3,7 +3,7 @@
   "use strict";
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
-  var page = 1;
+  var rq = { page: 1 };
 
   function statusPill(s) {
     return O.pill(t("review.status." + s), { pending: "warn", approved: "ok", returned: "bad", withdrawn: "" }[s]);
@@ -22,14 +22,18 @@
       (data.pending && data.pending.length ? '<div class="note warn" style="margin-top:8px">' + O.esc(t("person.pending_note", { n: data.pending.length })) + "</div>" : "") + "</div>" +
       '<div style="display:flex;gap:8px"><button type="button" class="btn" id="pf_view">' + O.icon("eye", 14) + " " + O.esc(t("profile.view")) + '</button><button type="button" class="btn pri" id="pf_edit">' + O.icon("edit", 14) + " " + O.esc(t("profile.edit")) + "</button></div></div>" +
       '<div class="card-b muted" style="padding-top:0;font-size:12.5px">' + O.esc(t("profile.rules")) + "</div></div>" +
-      '<div class="card"><div class="card-h">' + O.esc(t("profile.my_requests")) + '</div><div id="pf_reqs"></div></div>';
+      '<div class="card"><div class="card-h">' + O.esc(t("profile.my_requests")) + '</div><div class="bar" id="pf_bar" style="border:0;border-bottom:1px solid var(--line-2);border-radius:0"></div><div id="pf_reqs"></div></div>';
+    document.getElementById("pf_bar").appendChild(O.filters({ state: rq, onChange: loadRequests, period: t("review.submitted_at"), placeholder: t("profile.req_search"),
+      fields: [["reviewer", t("review.reviewer")], ["comment", t("review.return_reason")]] }));
     document.getElementById("pf_view").addEventListener("click", function () { O.person.open(p.id, { self: true, onSaved: load }); });
     document.getElementById("pf_edit").addEventListener("click", function () { O.person.open(p.id, { self: true, edit: true, onSaved: load }); });
     loadRequests();
   }
 
   function loadRequests() {
-    O.api("GET", "/api/v1/me/requests", null, { page: page }).then(function (res) {
+    var q = O.filterQuery(rq);
+    q.page = rq.page;
+    O.api("GET", "/api/v1/me/requests", null, q).then(function (res) {
       var box = document.getElementById("pf_reqs");
       box.innerHTML = "";
       box.appendChild(O.table({
@@ -42,7 +46,7 @@
         rows: res.rows, empty: t("profile.no_requests"),
         acts: function (r) { return [r.status === "pending" ? { icon: "undo", tip: t("profile.withdraw"), fn: withdraw } : null]; }
       }));
-      box.appendChild(O.pager(res, function (n) { page = n; loadRequests(); }));
+      box.appendChild(O.pager(res, function (n) { rq.page = n; loadRequests(); }));
     }, O.failed);
   }
 

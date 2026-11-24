@@ -75,6 +75,8 @@
   "perf.rv.return_many": "Return selected",
   "perf.rv.person": "Submitted by",
   "perf.rv.task": "Task",
+  "perf.rv.dept": "Department",
+  "perf.rv.reviewer": "Reviewer",
   "perf.rv.summary": "Summary",
   "perf.rv.files": "{n} attachments",
   "perf.rv.submitted_at": "Submitted",

@@ -198,6 +198,11 @@ class PersonnelTest extends TestCase
         $list = $this->data($this->request('GET', '/api/v1/family'));
         $this->same('13700002222', $list['rows'][0]['phone'], 'full with the sensitive permission');
         $this->same($before + 1, $this->auditCount('family_list_viewed'), 'each view audited');
+        // keyword in one field; encrypted phone and address are never searched
+        $found = $this->data($this->request('GET', '/api/v1/family', null, array('kw' => '王建华', 'field' => 'name')))['rows'];
+        $this->ok(count($found) >= 1 && count(array_filter($found, function ($x) { return $x['name'] !== '王建华'; })) === 0, 'search one field');
+        $this->same(0, count($this->data($this->request('GET', '/api/v1/family', null, array('kw' => '王建华', 'field' => 'employer')))['rows']), 'other field: no match');
+        $this->same(0, count($this->data($this->request('GET', '/api/v1/family', null, array('kw' => '13700002222')))['rows']), 'encrypted phone not searchable');
         // without family.sensitive: masked
         $unit = (int) DB::value("SELECT id FROM roles WHERE code = 'unit_head'");
         $sens = (int) DB::value("SELECT id FROM permissions WHERE code = 'family.sensitive'");

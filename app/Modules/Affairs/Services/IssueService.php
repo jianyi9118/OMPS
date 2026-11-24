@@ -92,15 +92,20 @@ class IssueService
         return (int) $i['need_reply'] === 1 && $i['due_at'] !== null && (string) $i['status'] === 'active' && $doneAt === null && (string) $i['due_at'] < now();
     }
 
-    public static function index(Request $req, $box, $filter, $page, $size)
+    /** Keyword fields of the lists (the browser offers the same keys); the received list also searches the sender. */
+    const SEARCH = array('title' => 'i.title', 'body' => 'i.body');
+
+    /** $f = list filters (period on the time the item was sent). */
+    public static function index(Request $req, $box, $filter, array $f, $page, $size)
     {
         $uid = $req->userId();
         if ($box === 'sent') {
-            $q = DB::table('issues')->where('sender_id', $uid);
+            $q = DB::table('issues i')->where('i.sender_id', $uid);
             if ($filter === 'pending') {
-                $q->where('status', 'active');
+                $q->where('i.status', 'active');
             }
-            $res = $q->orderBy('id', 'DESC')->paginate($page, $size);
+            $q->whereFilters($f, 'i.created_at', self::SEARCH);
+            $res = $q->orderBy('i.id', 'DESC')->paginate($page, $size);
             $ids = array();
             foreach ($res['rows'] as $i) {
                 $ids[] = (int) $i['id'];
@@ -124,11 +129,13 @@ class IssueService
             $res['rows'] = $rows;
             return $res;
         }
-        $q = DB::table('issue_recipients ir')->join('issues i', 'i.id', '=', 'ir.issue_id')->where('ir.user_id', $uid)
+        $q = DB::table('issue_recipients ir')->join('issues i', 'i.id', '=', 'ir.issue_id')->leftJoin('users su', 'su.id', '=', 'i.sender_id')
+            ->leftJoin('personnel_profiles sp', 'sp.id', '=', 'su.person_id')->where('ir.user_id', $uid)
             ->select(array('i.*', 'ir.read_at', 'ir.done_at', 'ir.id as rid'));
         if ($filter === 'pending') {
             $q->where('i.status', 'active')->whereNull('ir.done_at')->whereRaw('(i.need_reply = 1 OR ir.read_at IS NULL)');
         }
+        $q->whereFilters($f, 'i.created_at', array_merge(self::SEARCH, array('sender' => array('sp.name', 'su.display_name'))));
         $res = $q->orderBy('i.id', 'DESC')->paginate($page, $size);
         $rows = array();
         foreach ($res['rows'] as $i) {

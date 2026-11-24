@@ -49,10 +49,16 @@ class AffairsController extends Controller
         return array('rows' => $t['rows'], 'counts' => $t['counts']);
     }
 
+    public function todoHistory(Request $req)
+    {
+        list($page, $size) = $this->pageArgs($req);
+        return TodoService::history($req->user, $this->filterArgs($req), $page, $size);
+    }
+
     public function notifications(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return NotificationService::index($req, $req->str('tab') === 'unread' ? 'unread' : 'all', $page, $size);
+        return NotificationService::index($req, $req->str('tab') === 'unread' ? 'unread' : 'all', $this->filterArgs($req), $page, $size);
     }
 
     public function readOne(Request $req)
@@ -84,7 +90,8 @@ class AffairsController extends Controller
     public function notes(Request $req)
     {
         $box = $req->str('box') === 'inbox' ? 'inbox' : 'mine';
-        return NoteService::index($req, $box, $req->str('kw'), $req->str('filter'));
+        list($page, $size) = $this->pageArgs($req);
+        return NoteService::index($req, $box, $req->str('filter'), $this->filterArgs($req), $page, $size);
     }
 
     public function note(Request $req)
@@ -136,7 +143,7 @@ class AffairsController extends Controller
     public function issues(Request $req)
     {
         list($page, $size) = $this->pageArgs($req);
-        return IssueService::index($req, $req->str('box') === 'sent' ? 'sent' : 'in', $req->str('filter') === 'all' ? 'all' : 'pending', $page, $size);
+        return IssueService::index($req, $req->str('box') === 'sent' ? 'sent' : 'in', $req->str('filter') === 'all' ? 'all' : 'pending', $this->filterArgs($req), $page, $size);
     }
 
     public function issue(Request $req)

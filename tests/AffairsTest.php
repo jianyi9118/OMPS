@@ -307,6 +307,15 @@ class AffairsTest extends TestCase
         $this->status(200, $this->request('POST', '/api/v1/reviews/approve', array('ids' => array($cid))), 'approve change');
         $this->same(1, $this->notes($f['uWang']['id'], 'change_approved', 'change_request', $cid));
 
+        // 已处理: the department head finds the reviews they handled
+        $h = $this->data($this->request('GET', '/api/v1/todo/history', null, array('size' => 5)));
+        $done = array();
+        foreach ($h['rows'] as $r) {
+            $done[] = $r['kind'] . '|' . $r['result'];
+        }
+        $this->ok(in_array('perf_review|approved', $done, true) && in_array('change_review|approved', $done, true), 'reviews in the history');
+        $this->same(5, $h['size']);
+
         // moved out of the department: the unit head is told and gets a to-do
         $this->status(200, $this->request('POST', '/api/v1/staff/' . $f['chen'] . '/remove', array('type' => 'move_out', 'date' => date('Y-m-d'))));
         $this->same(1, $this->notes($f['uUnit']['id'], 'staff_moved_out', 'person', $f['chen']));

@@ -3,14 +3,17 @@
   "use strict";
   var O = window.OMPS, t = O.t;
   var view = document.getElementById("view");
-  var state = { kw: "", role_id: "", status: "", page: 1 };
+  var state = { role_id: "", status: "", page: 1 };
   var opts = { roles: [], persons: [], canAdd: false, canEdit: false, canDel: false };
+  var ready = false; // the list waits for the options (see the end)
 
-  view.innerHTML = '<div class="bar"><input type="search" id="u_kw" placeholder="' + O.esc(t("user.search")) + '">' +
-    '<select id="u_role"><option value="">' + O.esc(t("user.all_roles")) + '</option></select>' +
+  view.innerHTML = '<div class="bar" id="u_bar"><select id="u_role"><option value="">' + O.esc(t("user.all_roles")) + '</option></select>' +
     '<select id="u_status"><option value="">' + O.esc(t("user.all_status")) + '</option><option value="active">' + O.esc(t("status.active")) + '</option><option value="disabled">' + O.esc(t("status.disabled")) + '</option><option value="locked">' + O.esc(t("status.locked")) + "</option></select>" +
     '<span class="sp"></span><button type="button" class="btn pri" id="u_add" hidden>' + O.icon("plus", 14) + " " + O.esc(t("user.add")) + "</button></div>" +
     '<div class="card" id="u_card"></div>';
+  var bar = document.getElementById("u_bar");
+  bar.insertBefore(O.filters({ state: state, onChange: function () { if (ready) load(); }, period: t("user.field.created_at"),
+    fields: [["username", t("user.field.username")], ["name", t("user.field.name")], ["dept", t("user.field.dept")]], placeholder: t("user.search") }), bar.firstChild);
 
   function statusPill(u) {
     if (u.locked) return O.pill(t("status.locked"), "bad");
@@ -20,7 +23,11 @@
   }
 
   function load() {
-    O.api("GET", "/api/v1/users", null, { kw: state.kw, role_id: state.role_id, status: state.status, page: state.page }).then(render, O.failed);
+    var q = O.filterQuery(state);
+    q.role_id = state.role_id;
+    q.status = state.status;
+    q.page = state.page;
+    O.api("GET", "/api/v1/users", null, q).then(render, O.failed);
   }
 
   function render(res) {
@@ -128,9 +135,8 @@
     var sel = document.getElementById("u_role");
     opts.roles.forEach(function (r) { sel.insertAdjacentHTML("beforeend", '<option value="' + r.id + '">' + O.esc(r.name) + "</option>"); });
     document.getElementById("u_add").hidden = !opts.canAdd;
-  }).then(load, load);
+  }).then(null, function () {}).then(function () { ready = true; load(); });
   document.getElementById("u_add").addEventListener("click", add);
-  document.getElementById("u_kw").addEventListener("input", O.debounce(function (e) { state.kw = e.target.value.trim(); state.page = 1; load(); }, 350));
   document.getElementById("u_role").addEventListener("change", function (e) { state.role_id = e.target.value; state.page = 1; load(); });
   document.getElementById("u_status").addEventListener("change", function (e) { state.status = e.target.value; state.page = 1; load(); });
 })();

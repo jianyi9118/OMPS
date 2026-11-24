@@ -12,6 +12,7 @@ $router->get('/api/v1/me/pulse', $c . 'pulse');
 $router->get('/api/v1/me/prefs', $c . 'prefs');
 $router->put('/api/v1/me/prefs', $c . 'savePrefs');
 $router->get('/api/v1/todo', $c . 'todo');
+$router->get('/api/v1/todo/history', $c . 'todoHistory');
 
 $router->get('/api/v1/notifications', $c . 'notifications');
 $router->post('/api/v1/notifications/read-all', $c . 'readAll');
