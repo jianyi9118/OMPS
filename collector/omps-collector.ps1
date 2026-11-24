@@ -1,14 +1,15 @@
-﻿<#
-  OMPS 设备采集客户端 1.0（设计文档第 14 节）
+<#
+  OMPS device collector 1.0 (design document section 14)
 
-  只采集服务器“采集范围”中列出的硬件信息：计算机名、操作系统、CPU、内存、硬盘、主板、显示器、网卡。
-  不采集键盘输入、屏幕、文件、浏览记录、登录账号。
-  兼容 Windows 自带的 PowerShell 2.0 及以上，不需要安装任何软件。
+  Collects only the hardware items listed in the server's "Collection scope": computer name,
+  operating system, CPU, memory, disks, motherboard, monitors, network adapters.
+  Never collects keystrokes, screen contents, files, browsing history or login accounts.
+  Works with the PowerShell 2.0 built into Windows and later; nothing else is installed.
 
-  用法：
-    注册（安装时运行一次）：  omps-collector.ps1 -Register -Server http://服务器/omps -Code 注册码
-    上报（计划任务调用）：    omps-collector.ps1 -Event boot | daily
-    查看将要上报的内容：      omps-collector.ps1 -Show
+  Usage:
+    Register (once, at install):      omps-collector.ps1 -Register -Server http://server/omps -Code CODE
+    Report (run by scheduled tasks):  omps-collector.ps1 -Event boot | daily
+    Show what would be reported:      omps-collector.ps1 -Show
 #>
 param(
     [switch]$Register,
@@ -144,18 +145,18 @@ function Fail($msg, $code) { Write-Host $msg; exit $code }
 $cfg = Read-Config
 
 if ($Register) {
-    if ($Server -eq '' -or $Code -eq '') { Fail '注册需要 -Server 和 -Code。' 1 }
+    if ($Server -eq '' -or $Code -eq '') { Fail 'Registration needs -Server and -Code.' 1 }
     $os = Wmi 'Win32_OperatingSystem'
     $osText = ''; if ($os.Count) { $osText = $os[0].Caption + ' ' + $os[0].Version }
     $body = '{"code":' + (J-Str $Code) + ',"computer_name":' + (J-Str $env:COMPUTERNAME) + ',"os":' + (J-Str $osText) + ',"version":' + (J-Str $Version) + '}'
     try { $resp = Post (Api $Server '/api/v1/collector/register') $body $null }
-    catch { Fail ('注册失败：' + $_.Exception.Message + '（注册码错误、已用过或已过期时，请设备管理员重新生成）') 1 }
+    catch { Fail ('Registration failed: ' + $_.Exception.Message + ' (if the code is wrong, used or expired, ask the device administrator for a new one)') 1 }
     $t = [regex]::Match($resp, '"token":"([a-f0-9]+)"')
-    if (-not $t.Success) { Fail '注册失败：服务器没有返回令牌。' 1 }
+    if (-not $t.Success) { Fail 'Registration failed: the server returned no token.' 1 }
     $scope = Scope-From $resp
     $cfg = @{ 'server' = $Server.TrimEnd('/'); 'token' = $t.Groups[1].Value; 'scope' = ($scope -join ',') }
     Write-Config $cfg
-    Write-Host ('注册成功。本机将上报：' + ($scope -join ', '))
+    Write-Host ('Registered. This computer will report: ' + ($scope -join ', '))
     $Event = 'boot'
 }
 
@@ -164,22 +165,22 @@ if ($cfg['scope'] -ne $null) { $scope = @($cfg['scope'].Split(',') | Where-Objec
 $data = Collect $scope
 
 if ($Show) {
-    Write-Host ('采集范围：' + ($scope -join ', '))
+    Write-Host ('Collection scope: ' + ($scope -join ', '))
     Write-Host $data
     exit 0
 }
 
-if (-not $cfg['token']) { Fail ('还没有注册：' + $ConfigPath) 1 }
+if (-not $cfg['token']) { Fail ('Not registered yet: ' + $ConfigPath) 1 }
 if (@('boot', 'daily', 'manual') -notcontains $Event) { $Event = 'manual' }
 $body = '{"event":' + (J-Str $Event) + ',"version":' + (J-Str $Version) + ',"data":' + $data + '}'
 try { $resp = Post (Api $cfg['server'] '/api/v1/collector/report') $body $cfg['token'] }
 catch {
     $msg = $_.Exception.Message
-    if ($msg -match '401') { Fail '上报被拒绝：本机令牌已被设备管理员撤销，需要重新注册。' 2 }
-    Fail ('上报失败（下次开机或明天再试）：' + $msg) 3
+    if ($msg -match '401') { Fail 'Report refused: the device administrator revoked this computer. Register it again.' 2 }
+    Fail ('Report failed (will retry at next start-up or tomorrow): ' + $msg) 3
 }
 # the server may have changed the scope: the next report follows it
 $cfg['scope'] = ((Scope-From $resp) -join ',')
 Write-Config $cfg
-Write-Host '上报完成。'
+Write-Host 'Report sent.'
 exit 0
