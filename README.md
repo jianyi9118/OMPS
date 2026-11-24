@@ -23,7 +23,7 @@ PHP + MariaDB 内部管理系统，在单位现有的 **XAMPP 7.2.3** 上运行�
 | 数据库 | MariaDB 10.1.31 | MariaDB 10.1.31、10.4 |
 | Web 服务器 | Apache 2.4（XAMPP 自带） | 有 / 无 mod_rewrite 都可以 |
 
-编码规则见 `docs/CODING_RULES.md`。每次修改后在两套环境运行 `php omps compat:check`、`php omps i18n:check`、`php omps test`。
+设计文档见 `docs/DESIGN.md`（[English](docs/DESIGN.en.md)；设计规则、各功能的工作方式、实施记录）；编码规则见 `docs/CODING_RULES.md`；代码结构见 `docs/CODE_STRUCTURE.md`（[English](docs/CODE_STRUCTURE.en.md)），数据库结构见 `docs/DATABASE.md`（[English](docs/DATABASE.en.md)）。每次修改后在两套环境运行 `php omps compat:check`、`php omps i18n:check`、`php omps test`。
 
 ## 目录
 
