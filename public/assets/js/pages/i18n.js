@@ -66,7 +66,7 @@
         return [
           { icon: "edit", tip: t("i18n.edit"), fn: function () { st.tab = "entries"; st.code = l.code; st.page = 1; draw(); } },
           l.enabled && !l.default ? { icon: "check", tip: t("i18n.make_default"), fn: function () { update(l, { default: true }, t("i18n.defaulted", { name: l.name })); } } : null,
-          l.base || l.default ? null : { icon: "power", tip: t(l.enabled ? "i18n.disable" : "i18n.enable"), fn: function () { toggle(l); } },
+          { icon: "power", tip: t(l.enabled ? "i18n.disable" : "i18n.enable"), fn: function () { toggle(l); } },
           l.enabled || l.base ? null : { icon: "trash", tip: t("common.delete"), danger: true, fn: function () { removeLang(l); } }
         ];
       }, slots: 4
@@ -92,12 +92,21 @@
   }
 
   function update(l, body, msg) {
-    O.api("PUT", "/api/v1/languages/" + encodeURIComponent(l.code), body).then(function () { O.status(msg); load(); }, O.failed);
+    O.api("PUT", "/api/v1/languages/" + encodeURIComponent(l.code), body).then(function (r) {
+      if (r && r.default_moved) msg = t("i18n.disabled_moved", { name: l.name, def: r.default_name });
+      O.status(msg);
+      // the page itself was in that language, or the default changed: show it in the language now in use
+      if (body.enabled === false && (l.code === O.boot.lang || (r && r.default_moved))) setTimeout(function () { window.location.reload(); }, 800);
+      else load();
+    }, O.failed);
   }
 
   function toggle(l) {
     if (l.enabled) {
-      O.confirm({ title: t("i18n.disable"), msg: t("i18n.disable_confirm", { name: l.name }), ok: t("i18n.disable") }).then(function (ok) { if (ok) update(l, { enabled: false }, t("i18n.disabled_msg", { name: l.name })); });
+      var next = L.languages.filter(function (x) { return x.enabled && x.code !== l.code; })[0];
+      if (!next) { O.info(t("i18n.disable"), "<p>" + O.esc(t("i18n.err.last_on")) + "</p>"); return; }
+      var msg = l.default ? t("i18n.disable_default_confirm", { name: l.name, def: next.name }) : t("i18n.disable_confirm", { name: l.name });
+      O.confirm({ title: t("i18n.disable"), msg: msg, ok: t("i18n.disable") }).then(function (ok) { if (ok) update(l, { enabled: false }, t("i18n.disabled_msg", { name: l.name })); });
     } else if (l.missing) {
       O.info(t("i18n.enable"), "<p>" + O.esc(t("i18n.err.incomplete", { n: l.missing })) + "</p>");
     } else {

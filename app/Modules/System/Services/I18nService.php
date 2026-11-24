@@ -41,7 +41,7 @@ class I18nService
         return $l;
     }
 
-    /** Configuration entries that exist in the base language: ["ns:key" => text]. */
+    /** Configuration texts of one language: ["ns:key" => text]. */
     private static function configEntries($code)
     {
         $out = array();
@@ -51,25 +51,51 @@ class I18nService
         return $out;
     }
 
-    /** Current text of every entry of a language: ["key" => text] ('' = missing). */
-    private static function texts($code)
+    /**
+     * Every entry with its original text: program texts from the base language files, plus every
+     * configuration text any language has. A name typed while the base language was turned off
+     * exists only in the enabled languages; it is still an entry (its original is then the default
+     * language's text), so it is counted as missing in the base language until translated.
+     */
+    private static function source()
     {
+        $base = self::base();
+        $def = Lang::defaultCode();
+        $out = Lang::filePack($base);
+        $cfg = array();
+        $rank = array();
+        foreach (DB::table('translations')->where('namespace', '<>', 'ui')->orderBy('namespace')->orderBy('tkey')->get() as $r) {
+            $k = $r['namespace'] . ':' . $r['tkey'];
+            $p = (string) $r['lang'] === $base ? 0 : ((string) $r['lang'] === $def ? 1 : 2);
+            if (!isset($rank[$k]) || $p < $rank[$k]) {
+                $cfg[$k] = (string) $r['text'];
+                $rank[$k] = $p;
+            }
+        }
+        return array_merge($out, $cfg);
+    }
+
+    /** Current text of every entry of a language: ["key" => text] ('' = missing). */
+    private static function texts($code, $src = null)
+    {
+        $src = $src === null ? self::source() : $src;
         $out = array();
         $file = Lang::filePack($code);
         $over = Lang::overrides($code);
-        foreach (Lang::filePack(self::base()) as $k => $v) {
-            $out[$k] = isset($over[$k]) ? $over[$k] : (isset($file[$k]) ? $file[$k] : '');
-        }
         $cfg = self::configEntries($code);
-        foreach (self::configEntries(self::base()) as $k => $v) {
-            $out[$k] = isset($cfg[$k]) ? $cfg[$k] : '';
+        foreach ($src as $k => $v) {
+            if (strpos($k, ':') !== false) {
+                $out[$k] = isset($cfg[$k]) ? $cfg[$k] : '';
+            } else {
+                $out[$k] = isset($over[$k]) ? $over[$k] : (isset($file[$k]) ? $file[$k] : '');
+            }
         }
         return $out;
     }
 
-    public static function completeness($code)
+    public static function completeness($code, $src = null)
     {
-        $texts = self::texts($code);
+        $texts = self::texts($code, $src);
         $done = 0;
         foreach ($texts as $v) {
             $done += trim($v) !== '' ? 1 : 0;
@@ -81,8 +107,9 @@ class I18nService
     public static function languages()
     {
         $out = array();
+        $src = self::source();
         foreach (DB::table('languages')->orderBy('sort')->orderBy('id')->get() as $l) {
-            $c = self::completeness((string) $l['code']);
+            $c = self::completeness((string) $l['code'], $src);
             $out[] = array('code' => (string) $l['code'], 'name' => (string) $l['name'], 'enabled' => (int) $l['enabled'] === 1, 'default' => (int) $l['is_default'] === 1,
                 'base' => (string) $l['code'] === self::base(), 'done' => $c['done'], 'total' => $c['total'], 'pct' => $c['pct'], 'missing' => $c['missing'],
                 'files' => (bool) glob(OMPS_ROOT . '/resources/languages/' . $l['code'] . '/*.json'));
@@ -93,7 +120,7 @@ class I18nService
         }
         sort($mods);
         $ns = array();
-        foreach (DB::select("SELECT DISTINCT namespace FROM translations WHERE lang = ? AND namespace <> 'ui' ORDER BY namespace", array(self::base())) as $r) {
+        foreach (DB::select("SELECT DISTINCT namespace FROM translations WHERE namespace <> 'ui' ORDER BY namespace") as $r) {
             $ns[] = 'db:' . $r['namespace'];
         }
         $missing = array();
@@ -136,11 +163,16 @@ class I18nService
         return array('code' => $code);
     }
 
-    /** Name, enabled (only at 100 %), default. */
+    /**
+     * Name, enabled (only at 100 %), default. Any language may be turned off while another one stays
+     * on; when the default language is turned off, the first enabled language in the list becomes
+     * the default, so the system never has to fall back to a language that is off.
+     */
     public static function update(Request $req, $code, array $in)
     {
         $l = self::lang($code);
         $set = array();
+        $newDefault = null;
         if (isset($in['name'])) {
             $name = trim((string) $in['name']);
             if ($name === '' || mb_strlen($name) > 50) {
@@ -156,30 +188,55 @@ class I18nService
                     throw new HttpException(409, 'conflict', 'i18n.err.incomplete', array('n' => $c['missing']));
                 }
             }
-            if (!$on && ((string) $code === self::base() || (int) $l['is_default'] === 1)) {
-                throw HttpException::conflict('i18n.err.keep_on');
+            if (!$on && (int) $l['enabled'] === 1) {
+                $others = array_values(array_diff(Lang::enabledCodes(), array((string) $code)));
+                if (!$others) {
+                    throw HttpException::conflict('i18n.err.last_on');
+                }
+                if ((int) $l['is_default'] === 1 || Lang::defaultCode() === (string) $code) {
+                    $newDefault = $others[0];
+                }
             }
             $set['enabled'] = $on ? 1 : 0;
         }
-        if ($set) {
-            $set['updated_at'] = now();
-            DB::table('languages')->where('code', (string) $code)->update($set);
-            if (isset($set['enabled']) && !$set['enabled']) {
-                DB::table('users')->where('lang', (string) $code)->update(array('lang' => null));
-            }
+        if (!empty($in['default']) && !empty($set) && isset($set['enabled']) && !$set['enabled']) {
+            throw HttpException::conflict('settings.err.language_disabled');
         }
+        DB::transaction(function () use ($set, $code, $newDefault) {
+            if ($set) {
+                $set['updated_at'] = now();
+                DB::table('languages')->where('code', (string) $code)->update($set);
+                if (isset($set['enabled']) && !$set['enabled']) {
+                    DB::table('users')->where('lang', (string) $code)->update(array('lang' => null));
+                }
+            }
+            if ($newDefault !== null) {
+                DB::statement('UPDATE languages SET is_default = 0, updated_at = ? WHERE is_default = 1', array(now()));
+                DB::table('languages')->where('code', $newDefault)->update(array('is_default' => 1, 'updated_at' => now()));
+            }
+        });
         Lang::clearCache();
         if (!empty($in['default'])) {
             if (!LanguageService::setDefault((string) $code)) {
                 throw HttpException::conflict('settings.err.language_disabled');
             }
         }
+        $after = $set;
+        unset($after['updated_at']);
+        if (!empty($in['default'])) {
+            $after['default'] = 1;
+        }
+        if ($newDefault !== null) {
+            $after['default'] = 0;
+            $after['default_moved_to'] = $newDefault;
+        }
         Audit::change($req, 'i18n', 'language_changed', 'language', (int) $l['id'], (string) $code,
-            array('name' => (string) $l['name'], 'enabled' => (int) $l['enabled'], 'default' => (int) $l['is_default']),
-            array_merge($set, empty($in['default']) ? array() : array('default' => 1)));
-        return array('ok' => true);
+            array('name' => (string) $l['name'], 'enabled' => (int) $l['enabled'], 'default' => (int) $l['is_default']), $after);
+        $def = Lang::defaultCode();
+        return array('ok' => true, 'default' => $def, 'default_name' => LanguageService::name($def), 'default_moved' => $newDefault !== null);
     }
 
+    /** Only a language that is off can be deleted; the base language holds the original texts and stays (it can be turned off). */
     public static function delete(Request $req, $code)
     {
         $l = self::lang($code);
@@ -219,9 +276,9 @@ class I18nService
         self::lang($code);
         $base = self::base();
         $ref = $code === 'en-US' ? $base : 'en-US';
-        $src = self::texts($base);
-        $refTexts = $ref !== $base && DB::table('languages')->where('code', $ref)->exists() ? self::texts($ref) : array();
-        $cur = self::texts($code);
+        $src = self::source();
+        $refTexts = $ref !== $base && DB::table('languages')->where('code', $ref)->exists() ? self::texts($ref, $src) : array();
+        $cur = self::texts($code, $src);
         $files = Lang::keyFiles($base);
         $over = Lang::overrides($code);
         $mod = isset($f['module']) ? (string) $f['module'] : '';
@@ -253,8 +310,7 @@ class I18nService
     public static function save(Request $req, $code, array $items)
     {
         $l = self::lang($code);
-        $base = self::base();
-        $src = self::texts($base);
+        $src = self::source();
         $file = Lang::filePack($code);
         $errors = array();
         $plan = array();
@@ -344,8 +400,8 @@ class I18nService
         } catch (\Exception $e) {
             throw ValidationException::field('file', 'import.err.unreadable');
         }
-        $src = self::texts(self::base());
-        $cur = self::texts($code);
+        $src = self::source();
+        $cur = self::texts($code, $src);
         $ok = array();
         $errors = array();
         $skipped = 0;

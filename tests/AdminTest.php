@@ -190,7 +190,30 @@ class AdminTest extends TestCase
         $this->same('ファイル', Lang::get('menu.files', array(), 'ja-JP'));
         // a person may use it; disabling sends them back to the default
         DB::table('users')->where('id', (int) $unit['id'])->update(array('lang' => 'ja-JP'));
-        $this->status(409, $this->request('PUT', '/api/v1/languages/zh-CN', array('enabled' => false)), 'original stays on');
+        // Japanese on, Chinese and English off: the default moves along, Japanese ends up the default
+        $r = $this->data($this->request('PUT', '/api/v1/languages/zh-CN', array('enabled' => false)));
+        $this->ok($r['default_moved'] && $r['default'] === 'en-US', 'default moves to the first enabled language');
+        $r = $this->data($this->request('PUT', '/api/v1/languages/en-US', array('enabled' => false)));
+        $this->same('ja-JP', $r['default']);
+        Lang::clearCache();
+        $this->same(array('ja-JP'), Lang::enabledCodes());
+        $this->same('ja-JP', Lang::defaultCode());
+        $this->status(409, $this->request('PUT', '/api/v1/languages/ja-JP', array('enabled' => false)), 'one language stays on');
+        $this->status(409, $this->request('DELETE', '/api/v1/languages/zh-CN'), 'the original is kept');
+        // a name typed while Chinese is off is an entry Chinese must have before it is enabled again
+        DB::table('translations')->insert(array('namespace' => 'stat', 'tkey' => 'page.lang_test', 'lang' => 'ja-JP', 'text' => 'テスト', 'updated_at' => now()));
+        $zh2 = array_values(array_filter($this->data($this->request('GET', '/api/v1/languages'))['languages'], function ($l) {
+            return $l['code'] === 'zh-CN';
+        }))[0];
+        $this->same(1, $zh2['missing']);
+        $this->status(409, $this->request('PUT', '/api/v1/languages/zh-CN', array('enabled' => true)), 'zh-CN lacks the new name');
+        $this->status(200, $this->request('PUT', '/api/v1/languages/zh-CN/entries', array('items' => array(array('key' => 'stat:page.lang_test', 'text' => '测试')))));
+        $this->status(200, $this->request('PUT', '/api/v1/languages/zh-CN', array('enabled' => true)));
+        DB::table('translations')->where('namespace', 'stat')->where('tkey', 'page.lang_test')->delete();
+        $this->status(200, $this->request('PUT', '/api/v1/languages/en-US', array('enabled' => true)));
+        $this->status(200, $this->request('PUT', '/api/v1/languages/zh-CN', array('default' => true)));
+        Lang::clearCache();
+        $this->same('zh-CN', Lang::defaultCode());
         $this->status(409, $this->request('DELETE', '/api/v1/languages/ja-JP'), 'disable first');
         $this->status(200, $this->request('PUT', '/api/v1/languages/ja-JP', array('enabled' => false)));
         $this->ok(DB::value('SELECT lang FROM users WHERE id = ?', array((int) $unit['id'])) === null);

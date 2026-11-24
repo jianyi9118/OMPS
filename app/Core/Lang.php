@@ -249,6 +249,7 @@ class Lang
         return $out;
     }
 
+    /** The default language; if none is marked (or it is off), the first enabled one. */
     public static function defaultCode()
     {
         foreach (self::languages() as $l) {
@@ -256,7 +257,8 @@ class Lang
                 return (string) $l['code'];
             }
         }
-        return (string) config('app.base_language', 'zh-CN');
+        $on = self::enabledCodes();
+        return $on ? $on[0] : (string) config('app.base_language', 'zh-CN');
     }
 
     /** Language for a request: the user's own choice, else the login-page cookie, else the system default. */
