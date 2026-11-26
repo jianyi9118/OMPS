@@ -24,4 +24,8 @@ $router->group(array('perm' => 'perf.audit'), function ($r) use ($c) {
     $r->post('/api/v1/perf/reviews/return', $c . 'returnMany');
     $r->get('/api/v1/perf/reviews/{id}', $c . 'reviewDetail');
     $r->post('/api/v1/perf/reviews/{id}/approve', $c . 'editApprove');
+    // statistics of the people under me: assigned plans executed, daily to annual reports submitted
+    $r->get('/api/v1/perf/stats', $c . 'stats');
+    $r->get('/api/v1/perf/stats/items', $c . 'statItems');
+    $r->get('/api/v1/perf/stats/export', $c . 'statExport');
 });

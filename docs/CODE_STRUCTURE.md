@@ -139,7 +139,7 @@ app/Modules/Device/
 | Organization | 部门、人员列表、调动、待审核资料 | `DeptService`、`StaffService` | `depts.js`、`staff.js` |
 | Personnel | 人员档案详情、本人资料、家属、导入导出 | `PersonnelService`、`ChangeRequests`、`FamilyService`、`ImportExport`、`Fields` | `person.js`、`profile.js`、`family.js` |
 | Plan | 计划树、我的任务、时间显示 | `PlanService`、`PlanLabel` | `plans.js`、`plan.js` |
-| Performance | 写业绩、业绩审核、完成度汇总 | `PerformanceService` | `perf.js`、`review.js` |
+| Performance | 写业绩、业绩审核、完成度汇总、执行统计 | `PerformanceService`、`PerfStatsService` | `perf.js`、`review.js`、`perfstats.js` |
 | Report | 综合报告 | `ReportService` | `reports.js` |
 | Affairs | 待办（含已处理）、下发事项、记事本、通知、提醒规则与定时提醒 | `TodoService`、`IssueService`、`NoteService`、`NotificationService`、`RuleService`、`Scheduler`、`ReminderCalc` | `todo.js`、`issues.js`、`notes.js`、`notify.js`、`rules.js` |
 | Device | 设备档案、使用与监测、故障与维修、采集客户端接口 | `DeviceService`、`DeviceImport`、`CollectorService`、`RepairService` | `devices.js`、`device.js`（公共部分）、`monitor.js`、`repair.js` |

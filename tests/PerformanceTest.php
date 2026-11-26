@@ -241,6 +241,127 @@ class PerformanceTest extends TestCase
         @unlink($pdf);
     }
 
+    /** Workdays in [from, to] (the reports that are due), today only after work hours. */
+    private function workdays($from, $to)
+    {
+        $cal = \Omps\Engines\WorkCalendar::fromSettings();
+        $n = 0;
+        $today = date('Y-m-d');
+        $past = (int) date('G') * 60 + (int) date('i') >= $cal->end;
+        for ($ts = strtotime($from . ' 12:00:00'); date('Y-m-d', $ts) <= $to; $ts = strtotime('+1 day', $ts)) {
+            $d = date('Y-m-d', $ts);
+            if ($cal->isWorkday($ts) && ($d < $today || ($d === $today && $past))) {
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    /** The last Monday–Friday day before $before. */
+    private function lastWorkday($before)
+    {
+        $ts = strtotime($before . ' 12:00:00 -1 day');
+        while ((int) date('N', $ts) > 5) {
+            $ts = strtotime('-1 day', $ts);
+        }
+        return date('Y-m-d', $ts);
+    }
+
+    public function testStatistics()
+    {
+        list($long, $annual, $q, $m) = $this->chain();
+        $f = $this->f;
+        $today = date('Y-m-d');
+        $from = date('Y-m-d', strtotime('-20 days'));
+        $to = date('Y-m-d', strtotime('+30 days'));
+        // nothing is expected before a record exists: move the records back
+        DB::table('personnel_profiles')->whereIn('id', array($f['wang'], $f['chen'], $f['lead']))->update(array('created_at' => date('Y-m-d H:i:s', strtotime('-60 days'))));
+        $d0 = $this->lastWorkday(date('Y-m-d', strtotime('-2 days')));
+        $d1 = $this->lastWorkday($d0);
+        $mon = date('Y-m-d', strtotime('monday this week -7 days'));
+        $fri = date('Y-m-d', strtotime($mon . ' +4 days'));
+
+        // 王晓: a daily report submitted on d0, a draft on d1, a weekly report last week, a result on his own quarter
+        $this->login($f['uWang']['username']);
+        $day0 = $this->make(array('title' => '日报 ' . $d0, 'level' => 'day', 'parent_id' => $q, 'start' => $d0, 'end' => $d0));
+        $day1 = $this->make(array('title' => '日报 ' . $d1, 'level' => 'day', 'parent_id' => $q, 'start' => $d1, 'end' => $d1));
+        $week = $this->make(array('title' => '上周周报', 'level' => 'week', 'parent_id' => $q, 'start' => $mon, 'end' => $fri));
+        $this->status(200, $this->save($day0, array('progress' => '100', 'done' => '完成接口联调', 'submit' => true)));
+        $this->status(200, $this->save($day1, array('progress' => '50', 'done' => '草稿', 'submit' => false)));
+        $this->status(200, $this->save($week, array('progress' => '80', 'done' => '本周完成联调', 'submit' => true)));
+        $this->status(200, $this->save($q, array('progress' => '30', 'done' => '联调进行中', 'submit' => true)));
+        // members do not see statistics
+        $this->status(403, $this->request('GET', '/api/v1/perf/stats'));
+
+        // a plan given to 陈静 that has ended without a result, and one for 王晓 that has not started
+        $this->login($f['uLead']['username']);
+        $ended = $this->make(array('title' => '需求调研', 'level' => 'week', 'parent_id' => $annual, 'start' => $d1, 'end' => $d0, 'assignees' => array($f['chen'])));
+        $later = $this->make(array('title' => '验收准备', 'level' => 'day', 'parent_id' => $annual, 'start' => date('Y-m-d', strtotime('+10 days')), 'end' => date('Y-m-d', strtotime('+10 days')),
+            'assignees' => array($f['wang'])));
+        $q0 = array('from' => $from, 'to' => $to);
+        $res = $this->request('GET', '/api/v1/perf/stats', null, $q0);
+        $this->status(200, $res);
+        $d = $this->data($res);
+        $rows = array();
+        foreach ($d['rows'] as $r) {
+            $rows[$r['person_id']] = $r;
+        }
+        $this->ok(isset($rows[$f['wang']], $rows[$f['chen']]) && !isset($rows[$f['lead']]), 'my people, not me');
+        $this->ok(!isset($rows[$f['zhou']]), 'not another department');
+
+        // assigned plans: 王晓 annual (doing through his quarter) + later (future); his own quarter, month, days, week do not count
+        $w = $rows[$f['wang']]['plans'];
+        $this->same(array(0, 1, 0, 1, 1, 100.0), array($w['done'], $w['doing'], $w['none'], $w['future'], $w['due'], (float) $w['rate']), 'wang plans');
+        $c = $rows[$f['chen']]['plans'];
+        $this->same(array(0, 0, 2, 2, 1, 0.0), array($c['executed'], $c['doing'], $c['none'], $c['due'], $c['overdue'], (float) $c['rate']), 'chen plans: annual + ended (overdue)');
+
+        // daily reports: every workday from the period start is due
+        $exp = $this->workdays($from, $today);
+        $wd = $rows[$f['wang']]['day'];
+        $this->same(array($exp, 1, $exp - 1), array($wd['expected'], $wd['submitted'], $wd['missing']), 'wang daily');
+        $this->same(0, $rows[$f['chen']]['day']['submitted']);
+        $this->ok($rows[$f['wang']]['week']['submitted'] === 1 && $rows[$f['wang']]['week']['expected'] >= 2, 'weekly');
+        $this->same($exp * 2, $d['total']['day']['expected'], 'total');
+
+        // the lists behind the figures
+        $it = $this->data($this->request('GET', '/api/v1/perf/stats/items', null, array_merge($q0, array('kind' => 'plans', 'person_id' => $f['wang']))));
+        $ids = array_map(function ($x) { return $x['plan']['id']; }, $it['rows']);
+        sort($ids);
+        $want = array($annual, $later);
+        sort($want);
+        $this->same($want, $ids, 'assigned plans of wang');
+        foreach ($it['rows'] as $x) {
+            if ($x['plan']['id'] === $annual) {
+                $this->ok($x['state'] === 'doing' && $x['via_sub'], 'executed through a sub-plan');
+            }
+        }
+        $it = $this->data($this->request('GET', '/api/v1/perf/stats/items', null, array_merge($q0, array('kind' => 'day', 'person_id' => $f['wang'], 'state' => 'missing', 'size' => 100))));
+        $this->same($exp - 1, $it['total']);
+        $st = array();
+        foreach ($it['rows'] as $x) {
+            $st[$x['key']] = $x['status'];
+        }
+        $this->same('draft', isset($st[$d1]) ? $st[$d1] : '', 'draft counts as missing');
+        $this->same(1, $it['counts']['submitted']);
+        $it = $this->data($this->request('GET', '/api/v1/perf/stats/items', null, array_merge($q0, array('kind' => 'plans', 'state' => 'overdue'))));
+        $this->same(array($ended), array_map(function ($x) { return $x['plan']['id']; }, $it['rows']), 'overdue');
+        // filters: one person, only people with gaps, keyword
+        $this->same(1, count($this->data($this->request('GET', '/api/v1/perf/stats', null, array_merge($q0, array('person_id' => $f['chen']))))['rows']));
+        $this->same(0, count($this->data($this->request('GET', '/api/v1/perf/stats', null, array_merge($q0, array('kw' => 'zz-nobody'))))['rows']));
+        $this->ok(count($this->data($this->request('GET', '/api/v1/perf/stats', null, array_merge($q0, array('gaps' => 1))))['rows']) >= 1, 'gaps');
+        $x = $this->request('GET', '/api/v1/perf/stats/export', null, $q0);
+        $this->status(200, $x);
+        $this->same('PK', substr($x->body, 0, 2), 'xlsx');
+
+        // another department head sees neither; the unit head sees the department head too
+        $this->login($f['uZhou']['username']);
+        $ids = array_map(function ($r) { return $r['person_id']; }, $this->data($this->request('GET', '/api/v1/perf/stats', null, $q0))['rows']);
+        $this->ok(!in_array($f['wang'], $ids, true) && !in_array($f['zhou'], $ids, true), 'other department');
+        $this->login($f['uUnit']['username']);
+        $ids = array_map(function ($r) { return $r['person_id']; }, $this->data($this->request('GET', '/api/v1/perf/stats', null, $q0))['rows']);
+        $this->ok(in_array($f['lead'], $ids, true) && in_array($f['wang'], $ids, true) && !in_array($f['boss'], $ids, true), 'unit scope');
+    }
+
     public function testPagesAndMenus()
     {
         $this->login($this->f['uWang']['username']);

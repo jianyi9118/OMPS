@@ -6,9 +6,40 @@
   var state = { tab: "pending", person_id: "", page: 1 };
   var data = null, picked = {};
 
+  /* two sub-pages: review (pending / reviewed) and statistics (assets/js/pages/perfstats.js) */
+  var page = O.qs("view") === "stats" ? "stats" : "review", built = { review: false, stats: false };
+  function frame() {
+    view.innerHTML = '<div class="subnav" style="border:1px solid var(--line);border-radius:4px" id="rv_tabs" role="tablist">' +
+      [["review", t("perf.st.tab_review")], ["stats", t("perf.st.tab")]].map(function (x) {
+        return '<button type="button" role="tab" data-page="' + x[0] + '">' + O.esc(x[1]) + "</button>"; }).join("") +
+      '</div><div id="rv_page_review" style="display:none;gap:12px"></div><div id="rv_page_stats" style="display:none;gap:12px"></div>';
+    document.getElementById("rv_tabs").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-page]") : null;
+      if (b) show(b.getAttribute("data-page"));
+    });
+  }
+  function show(p) {
+    page = p;
+    var bs = document.querySelectorAll("#rv_tabs [data-page]");
+    for (var i = 0; i < bs.length; i++) { var on = bs[i].getAttribute("data-page") === p; bs[i].classList.toggle("on", on); bs[i].setAttribute("aria-selected", on ? "true" : "false"); }
+    // each sub-page shows alone (the inline display:grid would override the hidden attribute)
+    document.getElementById("rv_page_review").style.display = p === "review" ? "grid" : "none";
+    document.getElementById("rv_page_stats").style.display = p === "stats" ? "grid" : "none";
+    if (window.history && history.replaceState) {
+      var u = new URL(window.location.href);
+      if (p === "stats") u.searchParams.set("view", "stats"); else u.searchParams.delete("view");
+      u.searchParams.delete("focus");
+      history.replaceState(null, "", u.pathname + u.search + u.hash);
+    }
+    if (built[p]) return;
+    built[p] = true;
+    if (p === "stats") O.perfStats.mount(document.getElementById("rv_page_stats"));
+    else { shell(); load(); }
+  }
+
   function shell() {
     // the bar is built once (the filters keep their input); drawBar() refreshes the tabs, people and batch actions
-    view.innerHTML = '<div class="bar" id="rv_bar"><button type="button" class="btn" data-tab="pending"></button><button type="button" class="btn" data-tab="done"></button>' +
+    document.getElementById("rv_page_review").innerHTML = '<div class="bar" id="rv_bar"><button type="button" class="btn" data-tab="pending"></button><button type="button" class="btn" data-tab="done"></button>' +
       '<select id="rv_person"></select><span class="sp"></span><span id="rv_acts" style="display:contents"></span></div><div class="card" id="rv_card"></div>';
     var bar = document.getElementById("rv_bar");
     bar.insertBefore(O.filters({ state: state, onChange: load, period: t("perf.rv.submitted_at"), placeholder: t("perf.rv.search"),
@@ -166,10 +197,10 @@
     }, O.failed);
   }
 
-  shell();
+  frame();
   O.plan.meta().then(function () {
-    load();
     var focus = +O.qs("focus");
+    show(focus ? "review" : page);
     if (focus) {
       O.api("GET", "/api/v1/perf/reviews/" + focus).then(function (r) {
         if (r.status !== "submitted") state.tab = "done";

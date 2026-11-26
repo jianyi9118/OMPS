@@ -1,6 +1,6 @@
 # OMPS Design Document
 
-Design document for the Organization Management Platform (OMPS · Organization Management & Performance System). Design version **v0.47**, 2026-11-24.
+Design document for the Organization Management Platform (OMPS · Organization Management & Performance System). Design version **v0.48**, 2026-11-26.
 
 This document explains **why the system is designed the way it is and what rules each feature follows**: architecture, permissions, plans and results, reports, reminders, devices, customization, multiple languages, interface conventions, and the implementation record of each phase. Other documents:
 
@@ -976,6 +976,31 @@ Department heads handle results submitted by members here: they can edit and app
 - **Edit and approve:** Open the submission; the department head can change the completion percentage and the result text directly and click "Save and approve". The original submission is kept in the history, and the submitter receives an "Edited and approved" notification.
 - **Bulk approve:** Tick several entries and click "Bulk approve"; one confirmation is enough. Returning requires a reason (several entries can share one reason).
 - **Log:** Each approval, return and edit is recorded separately in the operation log; edits record the content before and after the change.
+
+<a id="perf-stats"></a>
+
+#### 9.5.1 Execution statistics (v0.48)
+
+The "Results review" menu item is renamed **Review & statistics**; the page has two sub-pages: **Review** and **Statistics**. Statistics covers the people in the reviewer's scope (with a login, not the reviewer), per person: how many assigned plans were executed and how many were not, how many daily, weekly, monthly, quarterly and annual reports were due, submitted and missing, and the percentages. Every figure can be opened to see exactly which ones.
+
+| Part | Content |
+|---|---|
+| **Filters** | Period (this month by default; today, this week, this year, all, custom), department (with its sub-departments), person, show "All" or "Only people with something not done or not submitted", search by name |
+| **Overview** | Six figures: assigned plans executed, daily / weekly / monthly / quarterly / annual reports submitted; each shows the percentage, a bar and "executed / not executed / due" or "submitted / missing / due". "—" when nothing is due in the period |
+| **By person** | One row per person, one column per kind: percentage, bar, "submitted / due", plus "n not executed", "n missing", "n overdue" when something is missing; a total row at the end. Click a column title to sort by the percentage; kinds with nothing due for anyone have no column |
+| **Lists** | Click a figure or a cell to open its list, filter by state (all, executed, not executed, not started, overdue; or all, submitted, missing), with paging; plans open directly |
+| **Export** | "Export Excel" exports the by-person table with the total |
+
+| Rule | Description |
+|---|---|
+| Assigned plans | Plans a leader gave to the person; sub-plans people add for themselves are not counted. A plan counts when its dates overlap the period; cancelled plans are left out |
+| Executed | The person has submitted a result (submitted or approved) on the plan or on an own sub-plan under it. "Completed" when the approved completion is 100% or the plan is marked done, otherwise "in progress" |
+| Not executed, not started, overdue | Started but no result submitted: not executed. Not started and nothing submitted: not started, left out of the rate. Past the end date and not completed: overdue |
+| Daily to annual reports | Results written on plans of that length (day, week, month, quarter, year, i.e. the plan level). One daily report per workday, and one per week, month, quarter and year |
+| Due | A report is due at the end of the last workday of its period (workdays and work hours are in the system settings). It counts when its due day is in the period and the due time has passed; nothing is due before the person's record was created or the hire date |
+| Submitted, missing | Submitted and approved count as submitted (early ones too); draft, returned, withdrawn, not written and no plan count as missing |
+| Colours | 90% and above green, 60%–90% amber, below 60% red; the numbers are always shown, never colour alone |
+| Permission | Same as results review (`perf.audit`): department heads see their department and its sub-departments, unit heads the whole unit |
 
 ### 9.6 System rules (no user settings needed)
 
@@ -2047,6 +2072,7 @@ A check against the design found that the "Workbench (shown by role)" in section
 
 Each design change made during development, listed by version from newest to oldest.
 
+- **v0.48 update:** The "Results review" menu item is renamed "Review & statistics" and gets a "Statistics" sub-page: per person, how assigned plans were executed and how many daily, weekly, monthly, quarterly and annual reports were due, submitted and missing, with percentages; every figure opens its list; filters for period, department and person; Excel export ([9.5.1](#perf-stats)).
 - **v0.47 update:** Any language can be disabled (including Simplified Chinese and the default language), but at least one enabled language must remain. When the default language is disabled, the system automatically makes the first enabled language in the language list the default language and says which one it switched to; for example, after adding and enabling Japanese and then disabling Simplified Chinese and English, Japanese becomes the default language. Simplified Chinese is the original text of all translations, so it cannot be deleted, only disabled; names created while it is disabled (fields, statistics pages, etc.) have text only in the enabled languages, and Simplified Chinese can be re-enabled only after these translations are filled in ([section 16](#i18n)).
 - **v0.46 update:** The "Backups" page adds "Automatic database clean-up": logs (operation log, login log, device usage records, hardware snapshots) and the audit log each get a retention period (1 month / 3 months / 6 months / 1 year / 3 years / Keep forever, default Keep forever), and backup retention changes to 7 days / 14 days / 1 month / 3 months / 6 months / 1 year / 3 years / Keep forever. Clean-up runs automatically once a day with the scheduled task (or with an open page) and deletes in batches; each device's latest hardware snapshot and any snapshot referenced by an anomaly record are kept; read notifications are kept for at most six months; business data such as plans, results, staff and devices is never deleted automatically. Saving a shorter period asks for confirmation first and cleans up immediately; a warning is shown when the audit log period is less than 1 year. The page shows the space used by the database and the logs, and the result of the last clean-up ([phase 9](#phase9done)).
 - **v0.45 update:** All lists now share the same filtering and paging. Above a list there is only one search box, one "Filter" button (its number shows how many conditions are active) and tags for the active conditions (click × to clear one). Clicking "Filter" opens a panel with the list's business filters (category, status, department, etc.), time (All / Today / This week / This month / This year / Custom start and end dates, applied to the date that matters most for that list) and search scope (all fields or one field); changes take effect immediately, and "Reset" clears everything at once. Encrypted ID numbers and family members' phone numbers and addresses are not searched. The pager shows "N items in total" on the left, and on the right the page size (10 / 20 / 30 / 50 / 100, default 30, remembered by the browser) and « ‹ [page] / total pages › »; a page number can be typed into the page box and Enter jumps to it. The Notebook now pages on the server; device export and staff export follow the current filter; the total cost of repair records is calculated from the filtered results ([section 17](#ui)).

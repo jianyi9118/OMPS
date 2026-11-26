@@ -147,7 +147,7 @@ app/Modules/Device/
 | Organization | Departments, staff list, transfers, profile changes to review | `DeptService`, `StaffService` | `depts.js`, `staff.js` |
 | Personnel | Personnel record, own profile, family, import / export | `PersonnelService`, `ChangeRequests`, `FamilyService`, `ImportExport`, `Fields` | `person.js`, `profile.js`, `family.js` |
 | Plan | Plan tree, my tasks, time labels | `PlanService`, `PlanLabel` | `plans.js`, `plan.js` |
-| Performance | Writing results, review, completion roll-up | `PerformanceService` | `perf.js`, `review.js` |
+| Performance | Writing results, review, completion roll-up, execution statistics | `PerformanceService`, `PerfStatsService` | `perf.js`, `review.js`, `perfstats.js` |
 | Report | Comprehensive reports | `ReportService` | `reports.js` |
 | Affairs | To-dos (and handled items), issued items, notebook, notifications, reminder rules and the scheduler | `TodoService`, `IssueService`, `NoteService`, `NotificationService`, `RuleService`, `Scheduler`, `ReminderCalc` | `todo.js`, `issues.js`, `notes.js`, `notify.js`, `rules.js` |
 | Device | Device records, usage and monitoring, faults and repairs, collector API | `DeviceService`, `DeviceImport`, `CollectorService`, `RepairService` | `devices.js`, `device.js` (shared), `monitor.js`, `repair.js` |

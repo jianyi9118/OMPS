@@ -3,13 +3,14 @@ namespace Omps\Modules\Performance\Controllers;
 
 use Omps\Core\Controller;
 use Omps\Core\Request;
+use Omps\Modules\Performance\Services\PerfStatsService;
 use Omps\Modules\Performance\Services\PerformanceService;
 
 class PerformanceController extends Controller
 {
     public function reviewPage(Request $req)
     {
-        return $this->renderPage($req, 'Performance::review', 'menu.perf_review', array(), array('plan', 'perf', 'review'));
+        return $this->renderPage($req, 'Performance::review', 'menu.perf_review', array(), array('plan', 'perf', 'perfstats', 'review'));
     }
 
     public function mine(Request $req)
@@ -67,5 +68,28 @@ class PerformanceController extends Controller
     public function returnMany(Request $req)
     {
         return PerformanceService::returnMany($req, $req->body);
+    }
+
+    /** Statistics filters from the query string. */
+    private function statArgs(Request $req)
+    {
+        $f = $this->filterArgs($req);
+        return array('from' => $f['from'], 'to' => $f['to'], 'kw' => $f['kw'], 'dept_id' => $req->int('dept_id'), 'person_id' => $req->int('person_id'), 'gaps' => $req->int('gaps') === 1);
+    }
+
+    public function stats(Request $req)
+    {
+        return PerfStatsService::summary($req, $this->statArgs($req));
+    }
+
+    public function statItems(Request $req)
+    {
+        list($page, $size) = $this->pageArgs($req);
+        return PerfStatsService::items($req, $this->statArgs($req), $req->str('kind'), $req->str('state'), $page, $size);
+    }
+
+    public function statExport(Request $req)
+    {
+        return PerfStatsService::export($req, $this->statArgs($req));
     }
 }
