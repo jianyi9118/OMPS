@@ -25,7 +25,6 @@
   "auth.password_letters_digits": "密码必须同时包含字母和数字",
   "auth.password_is_username": "密码不能与用户名相同",
   "auth.password_same": "新密码不能与当前密码相同",
-
   "user.search": "用户名 / 姓名",
   "user.all_roles": "角色：全部",
   "user.all_status": "状态：全部",
@@ -64,7 +63,6 @@
   "user.err.self_role_status": "不能修改自己的角色或停用自己",
   "user.err.self_logout": "不能强制自己下线，请使用“退出登录”",
   "user.err.self_delete": "不能删除自己的账号",
-
   "role.list_title": "角色",
   "role.count": "内置 {builtin} 个 · 自定义 {custom} 个",
   "role.add": "新增角色",
@@ -104,7 +102,6 @@
   "role.unit_head": "单位负责人",
   "role.dept_head": "部门负责人",
   "role.member": "普通成员",
-
   "perm.group.users": "用户账号",
   "perm.group.org": "组织架构",
   "perm.group.staff": "人员档案",
@@ -118,7 +115,6 @@
   "perm.action.audit": "审核",
   "perm.action.assign": "分配任务",
   "perm.action.sensitive": "敏感资料",
-
   "settings.group_unit": "单位信息",
   "settings.unit_name": "单位名称",
   "settings.unit_address": "单位地址",
@@ -134,7 +130,6 @@
   "settings.password_min_length": "密码最少位数",
   "settings.range": "范围 {min}–{max}",
   "settings.err.language_disabled": "只能选择已启用的语言作为默认语言",
-
   "log.tab.operation": "操作日志",
   "log.tab.audit": "审计日志",
   "log.tab.login": "登录日志",
@@ -197,5 +192,6 @@
   "log.action.access_denied": "越权访问被拒绝",
   "log.agent": "浏览器",
   "log.search": "搜索日志",
-  "user.field.created_at": "创建时间"
+  "user.field.created_at": "创建时间",
+  "perm.action.leave": "请假申请"
 }

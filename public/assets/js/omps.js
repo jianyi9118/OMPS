@@ -358,7 +358,8 @@
         }
         tds += '<td class="actc"><div class="ibs">' + html + "</div></td>";
       }
-      return "<tr>" + tds + "</tr>";
+      // the record id on the row lets a jump find it (flashRow)
+      return "<tr" + (r && r.id !== undefined && r.id !== null ? ' data-row-id="' + esc(String(r.id)) + '"' : "") + ">" + tds + "</tr>";
     }).join("") : '<tr class="empty"><td colspan="' + (cfg.cols.length + (cfg.acts ? 1 : 0)) + '">' + esc(cfg.empty || t("common.empty")) + "</td></tr>";
     wrap.innerHTML = '<table class="tbl"><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table>";
     wrap.addEventListener("click", function (e) {
@@ -1210,6 +1211,13 @@
     if (el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
     setTimeout(function () { el.classList.remove("fpulse"); }, 4500);
   }
+  /** Flash the table row of record id (O.table rows carry data-row-id); false when it is not on screen. */
+  function flashRow(id, root) {
+    if (!id) return false;
+    var el = (root || d).querySelector('tr[data-row-id="' + String(id).replace(/[^\w-]/g, "") + '"]');
+    if (el) flash(el);
+    return !!el;
+  }
   function qs(k) { return new URLSearchParams(w.location.search).get(k) || ""; }
 
   /* personal reminder preferences (user menu) */
@@ -1247,6 +1255,6 @@
     deptOpts: deptOpts, on: on, fillIcons: fillIcons, today: today, dateInput: dateInput,
     drawer: drawer, closeDrawer: closeDrawer, repeat: repeat, pickFiles: pickFiles, upload: upload, fileSize: fileSize, docChoices: docChoices,
     notifyText: notifyText, go: go, ago: ago, pulse: pulse, onPulse: function (k, fn) { pulseHooks[k] = fn; if (pulseData) fn(pulseData); },
-    focusBar: focusBar, flash: flash, qs: qs, left: left, cf: cf
+    focusBar: focusBar, flash: flash, flashRow: flashRow, qs: qs, left: left, cf: cf
   };
 })(window, document);

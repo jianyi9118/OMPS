@@ -9,6 +9,8 @@
   var ts = { type: "", page: 1 }, rs = { status: "pending", page: 1 };
   var pmeta = null;
   var meta = null;
+  // a jump (to-do, notification): the person or the change request to flash once its list is loaded
+  var jumpPerson = +qs.get("focus") || 0, jumpChange = qs.get("tab") === "review" ? +qs.get("id") || 0 : 0;
 
   function genderName(g) { return t("gender." + g); }
   function statusPill(r) {
@@ -121,6 +123,13 @@
         var row = res.rows.filter(function (x) { return x.id === +b.getAttribute("data-view"); })[0];
         if (row) openRecord(row, false);
       });
+      if (jumpPerson) {
+        // flash the person's row; open the record only when it is not in the list
+        var pid = jumpPerson, pr = res.rows.filter(function (x) { return x.id === pid; })[0];
+        jumpPerson = 0;
+        if (pr && O.flashRow(pid, card)) O.focusBar(pr.name);
+        else O.person.open(pid, { edit: false, onSaved: loadList });
+      }
     }, O.failed);
   }
 
@@ -258,6 +267,11 @@
       }));
       card.appendChild(O.pager(res, function (p) { rs.page = p; loadReviews(); }));
       if (pending) card.insertAdjacentHTML("beforeend", O.legend([["check", t("review.approve")], ["back", t("review.return")]]));
+      if (jumpChange) {
+        var cid = jumpChange, cr = res.rows.filter(function (x) { return x.id === cid; })[0];
+        jumpChange = 0;
+        if (cr && O.flashRow(cid, card)) O.focusBar(t("staff.located_change", { name: cr.person }));
+      }
     }, O.failed);
   }
 
@@ -376,7 +390,5 @@
     shell();
     renderTab();
     if (state.unassigned) O.focusBar(t("staff.located_unassigned"));
-    var focus = +qs.get("focus");
-    if (focus) O.person.open(focus, { edit: false, onSaved: loadList });
   }, O.failed);
 })();

@@ -22,6 +22,7 @@ class Notify
         'issue_sent_tip', 'issue_sent_doc', 'issue_sent_order', 'issue_nudge', 'issue_withdrawn', 'issue_done', 'issue_done_late', 'issue_overdue_list',
         'remind_issue_unread', 'remind_issue_due', 'remind_issue_overdue', 'remind_issue_interval', 'remind_perf_daily', 'remind_perf_period', 'remind_review', 'remind_change',
         'device_fault_reported', 'device_fault_assigned', 'device_fault_fixed', 'device_fault_cancelled', 'device_anomaly', 'remind_license',
+        'leave_applied', 'leave_approved', 'leave_rejected',
         'missing_translation',
     );
     const LEVELS = array('info', 'warn', 'urgent');

@@ -24,7 +24,9 @@ use Omps\Engines\WorkCalendar;
  * quarter, year — the plan level). Every workday needs a daily report, every week a weekly report,
  * and so on. A report is due at the end of the last workday of its period; it is counted when its
  * due day lies in the period and it is due already (one submitted early counts as submitted).
- * Nothing is expected before the person's record was created or before the hire date.
+ * Nothing is expected before the person's record was created or before the hire date. Holidays and
+ * make-up workdays come from the work calendar; no report is expected for a period in which the
+ * person is on leave on every workday (a daily report: on a day of leave).
  * Submitted = submitted or approved; returned, draft, withdrawn and unwritten are missing.
  */
 class PerfStatsService
@@ -285,7 +287,7 @@ class PerfStatsService
                 $due = $c === 'day' ? ($cal->isWorkday(strtotime($cur[1] . ' 12:00:00')) ? $cur[1] : null) : self::dueDay($cal, $cur[1], $cur[2]);
                 if ($due !== null && $due >= $from && $due <= $to) {
                     $periods[$c][] = array('key' => $cur[0], 'start' => $cur[1], 'end' => $cur[2], 'due' => $due,
-                        'past' => $due < $today || ($due === $today && $nowMin >= $cal->end));
+                        'past' => $due < $today || ($due === $today && $nowMin >= $cal->end), 'wds' => self::workdaysIn($cal, $cur[1], $cur[2]));
                 }
                 $cur = self::periodOf($c, date('Y-m-d', strtotime($cur[2] . ' 12:00:00 +1 day')));
             }
@@ -315,7 +317,9 @@ class PerfStatsService
                 }
             }
         }
+        $leave = LeaveService::days(array_keys($people), $lo, $hi);
         foreach ($people as $pid => $p) {
+            $off = isset($leave[$pid]) ? $leave[$pid] : array();
             foreach ($periods as $c => $list) {
                 foreach ($list as $x) {
                     if (($c === 'day' ? $x['start'] : $x['end']) < $p['floor']) {
@@ -327,6 +331,9 @@ class PerfStatsService
                     if (!$done && !$x['past']) {
                         continue; // not due yet
                     }
+                    if (!$done && $off && self::allOff($x['wds'], $off)) {
+                        continue; // on leave on every workday of the period
+                    }
                     $items[] = array('person_id' => $pid, 'cycle' => $c, 'key' => $x['key'], 'start' => $x['start'], 'end' => $x['end'], 'due' => $x['due'],
                         'state' => $done ? 'submitted' : 'missing', 'status' => $status, 'early' => $done && !$x['past'],
                         'plan' => $b === null ? null : self::brief($b), 'submitted_at' => $b !== null && $done ? substr((string) $b['submitted_at'], 0, 16) : '',
@@ -335,6 +342,30 @@ class PerfStatsService
             }
         }
         return $items;
+    }
+
+    /** Workdays (Y-m-d) in [start, end]. */
+    private static function workdaysIn(WorkCalendar $cal, $start, $end)
+    {
+        $out = array();
+        $ts = strtotime($start . ' 12:00:00');
+        for ($i = 0; $i < 400 && date('Y-m-d', $ts) <= $end; $i++) {
+            if ($cal->isWorkday($ts)) {
+                $out[] = date('Y-m-d', $ts);
+            }
+            $ts = WorkCalendar::addDays($ts, 1);
+        }
+        return $out;
+    }
+
+    private static function allOff(array $workdays, array $off)
+    {
+        foreach ($workdays as $d) {
+            if (!isset($off[$d])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ---------- figures ----------

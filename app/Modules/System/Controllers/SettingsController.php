@@ -8,6 +8,7 @@ use Omps\Core\Request;
 use Omps\Core\Settings;
 use Omps\Core\Validator;
 use Omps\Engines\Audit;
+use Omps\Modules\System\Services\HolidayService;
 use Omps\Modules\System\Services\LanguageService;
 
 /**
@@ -110,5 +111,25 @@ class SettingsController extends Controller
             Audit::change($req, 'settings', 'settings_changed', 'settings', null, null, $old, $changed);
         }
         return array('ok' => true);
+    }
+
+    public function holidays(Request $req)
+    {
+        return HolidayService::index($req->int('year'));
+    }
+
+    public function holidayStore(Request $req)
+    {
+        return HolidayService::store($req, $req->body);
+    }
+
+    public function holidayUpdate(Request $req)
+    {
+        return HolidayService::update($req, $this->idParam($req), $req->body);
+    }
+
+    public function holidayDestroy(Request $req)
+    {
+        return HolidayService::destroy($req, $this->idParam($req));
     }
 }

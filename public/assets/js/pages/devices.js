@@ -82,6 +82,17 @@
       }));
       card.appendChild(O.pager(res, function (p) { state.page = p; load(); }));
       card.insertAdjacentHTML("beforeend", O.legend([["eye", t("common.view")], ["edit", t("common.edit")], ["trash", t("common.delete")]]));
+      if (jumpId) {
+        // a jump (reminder, notification): flash the device's row; a licence reminder also opens its licences
+        var id = jumpId, d = res.rows.filter(function (x) { return x.id === id; })[0], lic = O.qs("tab") === "licenses";
+        jumpId = 0;
+        if (d && O.flashRow(id, card)) {
+          O.focusBar(d.asset_no + " " + d.name);
+          if (lic) D.detail(id, { tab: 2, onChange: load });
+        } else {
+          D.detail(id, { tab: lic ? 2 : 0, onChange: load }).then(function (x) { if (x) O.focusBar(x.asset_no + " " + x.name); });
+        }
+      }
     }, O.failed);
   }
 
@@ -136,11 +147,11 @@
     box.appendChild(btn);
   }
 
+  var jumpId = +O.qs("id") || 0;
   D.meta().then(function (m) {
     M = m;
     shell();
     render();
-    var focus = +O.qs("id");
-    if (focus) D.detail(focus, { tab: O.qs("tab") === "licenses" ? 2 : 0, onChange: load }).then(function (d) { if (d) O.focusBar(d.asset_no + " " + d.name); });
+    // a jump: load() flashes the row (see above)
   }, O.failed);
 })();

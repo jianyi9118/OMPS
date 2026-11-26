@@ -41,6 +41,11 @@ $router->group(array('perm' => 'system.settings'), function ($r) use ($c) {
     $r->get('/system/settings', $c . 'SettingsController@page');
     $r->get('/api/v1/settings', $c . 'SettingsController@show');
     $r->put('/api/v1/settings', $c . 'SettingsController@update');
+    // holidays and make-up workdays (the work calendar)
+    $r->get('/api/v1/holidays', $c . 'SettingsController@holidays');
+    $r->post('/api/v1/holidays', $c . 'SettingsController@holidayStore');
+    $r->put('/api/v1/holidays/{id}', $c . 'SettingsController@holidayUpdate');
+    $r->delete('/api/v1/holidays/{id}', $c . 'SettingsController@holidayDestroy');
 });
 
 // logs

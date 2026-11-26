@@ -362,6 +362,170 @@ class PerformanceTest extends TestCase
         $this->ok(in_array($f['lead'], $ids, true) && in_array($f['wang'], $ids, true) && !in_array($f['boss'], $ids, true), 'unit scope');
     }
 
+    private function figures($q0, $personId)
+    {
+        foreach ($this->data($this->request('GET', '/api/v1/perf/stats', null, $q0))['rows'] as $r) {
+            if ($r['person_id'] === $personId) {
+                return $r;
+            }
+        }
+        return null;
+    }
+
+    public function testHolidaysAndLeave()
+    {
+        $this->chain();
+        $f = $this->f;
+        DB::table('personnel_profiles')->whereIn('id', array($f['wang'], $f['chen'], $f['lead']))->update(array('created_at' => date('Y-m-d H:i:s', strtotime('-60 days'))));
+        $q0 = array('from' => date('Y-m-d', strtotime('-20 days')), 'to' => date('Y-m-d'));
+        $d0 = $this->lastWorkday(date('Y-m-d', strtotime('-2 days')));
+        $d1 = $this->lastWorkday($d0);
+        $sat = date('Y-m-d', strtotime('last saturday', strtotime('-1 day')));
+        $this->login($f['uLead']['username']);
+        $base = $this->figures($q0, $f['wang']);
+        $exp = $base['day']['expected'];
+        $this->ok($exp > 3, 'workdays expected');
+
+        // holidays (system settings, super admin): a day off is no workday, a make-up workday is one
+        $this->status(403, $this->request('POST', '/api/v1/holidays', array('name' => 'x', 'kind' => 'off', 'start' => $d0, 'end' => $d0)), 'leaders do not set holidays');
+        $super = $this->user('super');
+        $this->login($super['username']);
+        $r = $this->request('POST', '/api/v1/holidays', array('name' => '测试假日', 'kind' => 'off', 'start' => $d0, 'end' => $d0));
+        $this->status(200, $r);
+        $hOff = $this->data($r)['id'];
+        $this->status(422, $this->request('POST', '/api/v1/holidays', array('name' => '重叠', 'kind' => 'off', 'start' => $d0, 'end' => $d0)), 'overlap');
+        $this->status(422, $this->request('POST', '/api/v1/holidays', array('name' => '倒序', 'kind' => 'off', 'start' => $d0, 'end' => $d1)), 'end before start');
+        $this->status(422, $this->request('POST', '/api/v1/holidays', array('name' => '类型', 'kind' => 'x', 'start' => $d0, 'end' => $d0)), 'kind');
+        $hWork = $this->data($this->request('POST', '/api/v1/holidays', array('name' => '周末补班', 'kind' => 'work', 'start' => $sat, 'end' => $sat)))['id'];
+        $list = $this->data($this->request('GET', '/api/v1/holidays', null, array('year' => (int) substr($d0, 0, 4))));
+        $this->ok(count($list['rows']) >= 1 && $list['workdays'] > 200, 'year list');
+        $this->ok((int) DB::value('SELECT COUNT(*) FROM operation_logs WHERE action = ?', array('holiday_added')) >= 2, 'logged');
+        $this->login($f['uLead']['username']);
+        $after = $this->figures($q0, $f['wang']);
+        $this->same($exp - 1 + ($sat >= $q0['from'] ? 1 : 0), $after['day']['expected'], 'holiday out, make-up day in');
+        $days = array();
+        foreach ($this->data($this->request('GET', '/api/v1/perf/stats/items', null, array_merge($q0, array('kind' => 'day', 'person_id' => $f['wang'], 'size' => 100))))['rows'] as $x) {
+            $days[$x['key']] = true;
+        }
+        $this->ok(!isset($days[$d0]) && ($sat < $q0['from'] || isset($days[$sat])), 'the days listed');
+
+        // leave (leaders of the person): no daily report expected that day
+        $exp = $after['day']['expected'];
+        $r = $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['wang'], 'kind' => 'annual', 'start' => $d1, 'end' => $d1, 'note' => '回老家'));
+        $this->status(200, $r);
+        $lid = $this->data($r)['id'];
+        $this->status(422, $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['wang'], 'kind' => 'sick', 'start' => $d1, 'end' => $d1)), 'overlap');
+        $this->status(422, $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['zhou'], 'kind' => 'sick', 'start' => $d1, 'end' => $d1)), 'not my person');
+        $this->status(422, $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['lead'], 'kind' => 'sick', 'start' => $d1, 'end' => $d1)), 'not myself');
+        $this->status(422, $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['wang'], 'kind' => 'holiday', 'start' => $d1, 'end' => $d1)), 'kind');
+        $this->same($exp - 1, $this->figures($q0, $f['wang'])['day']['expected'], 'leave day out');
+        $this->same($exp, $this->figures($q0, $f['chen'])['day']['expected'], 'others unchanged');
+        $l = $this->data($this->request('GET', '/api/v1/perf/leaves', null, array('person_id' => $f['wang'])));
+        $this->same(1, $l['total']);
+        $this->same(array('annual', 1, 1, '回老家'), array($l['rows'][0]['kind'], $l['rows'][0]['days'], $l['rows'][0]['workdays'], $l['rows'][0]['note']));
+        $this->ok((int) DB::value('SELECT COUNT(*) FROM operation_logs WHERE action = ?', array('leave_added')) >= 1, 'logged');
+        // another department head neither sees nor changes it; members have no access
+        $this->login($f['uZhou']['username']);
+        $this->same(0, $this->data($this->request('GET', '/api/v1/perf/leaves', null, array('person_id' => $f['wang'])))['total']);
+        $this->status(404, $this->request('PUT', '/api/v1/perf/leaves/' . $lid, array('person_id' => $f['wang'], 'kind' => 'sick', 'start' => $d1, 'end' => $d1)));
+        $this->status(404, $this->request('DELETE', '/api/v1/perf/leaves/' . $lid));
+        $this->login($f['uWang']['username']);
+        $this->status(403, $this->request('GET', '/api/v1/perf/leaves'));
+
+        // a whole week of leave: no weekly report expected for it
+        $this->login($f['uLead']['username']);
+        $this->status(200, $this->request('DELETE', '/api/v1/perf/leaves/' . $lid));
+        $weeks = $this->figures($q0, $f['wang'])['week']['expected'];
+        $mon = date('Y-m-d', strtotime('monday this week -7 days'));
+        $sun = date('Y-m-d', strtotime($mon . ' +6 days'));
+        $r = $this->request('POST', '/api/v1/perf/leaves', array('person_id' => $f['wang'], 'kind' => 'sick', 'start' => $mon, 'end' => $sun));
+        $this->status(200, $r);
+        $this->same($weeks - 1, $this->figures($q0, $f['wang'])['week']['expected'], 'week of leave');
+        $this->status(200, $this->request('PUT', '/api/v1/perf/leaves/' . $this->data($r)['id'], array('person_id' => $f['wang'], 'kind' => 'sick', 'start' => $mon, 'end' => $mon)));
+        $this->same($weeks, $this->figures($q0, $f['wang'])['week']['expected'], 'one day only');
+        $this->same(array(), \Omps\Modules\Performance\Services\LeaveService::days(array($f['chen']), $mon, $sun));
+
+        // clean up: holidays apply to the whole system
+        $this->login($super['username']);
+        $this->status(200, $this->request('DELETE', '/api/v1/holidays/' . $hOff));
+        $this->status(200, $this->request('DELETE', '/api/v1/holidays/' . $hWork));
+        $this->status(404, $this->request('DELETE', '/api/v1/holidays/' . $hWork));
+    }
+
+    private function notified($userId, $type, $leaveId)
+    {
+        return (int) DB::value('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = ? AND biz_type = ? AND biz_id = ?', array((int) $userId, $type, 'person_leave', (int) $leaveId));
+    }
+
+    public function testLeaveApplication()
+    {
+        $this->chain();
+        $f = $this->f;
+        DB::table('personnel_profiles')->whereIn('id', array($f['wang'], $f['chen'], $f['lead']))->update(array('created_at' => date('Y-m-d H:i:s', strtotime('-60 days'))));
+        $q0 = array('from' => date('Y-m-d', strtotime('-20 days')), 'to' => date('Y-m-d'));
+        $d0 = $this->lastWorkday(date('Y-m-d', strtotime('-2 days')));
+        $d1 = $this->lastWorkday($d0);
+        $this->login($f['uLead']['username']);
+        $exp = $this->figures($q0, $f['wang'])['day']['expected'];
+
+        // 王晓 applies: waiting, not counted yet; his leader is told and has a to-do
+        $this->login($f['uWang']['username']);
+        $this->status(200, $this->request('GET', '/affairs/leave'));
+        $r = $this->request('POST', '/api/v1/leave/mine', array('kind' => 'personal', 'start' => $d1, 'end' => $d1, 'note' => '家里有事'));
+        $this->status(200, $r);
+        $this->same('pending', $this->data($r)['status']);
+        $lid = $this->data($r)['id'];
+        $this->status(422, $this->request('POST', '/api/v1/leave/mine', array('kind' => 'sick', 'start' => $d1, 'end' => $d1)), 'overlaps the pending one');
+        $this->status(200, $this->request('PUT', '/api/v1/leave/mine/' . $lid, array('kind' => 'annual', 'start' => $d1, 'end' => $d1)), 'change while pending');
+        $mine = $this->data($this->request('GET', '/api/v1/leave/mine'));
+        $this->same(array('annual', 'pending', true), array($mine['rows'][0]['kind'], $mine['rows'][0]['status'], $mine['rows'][0]['applied']));
+        $this->ok($this->notified($f['uLead']['id'], 'leave_applied', $lid) >= 1, 'leader told');
+        $this->status(403, $this->request('POST', '/api/v1/perf/leaves/' . $lid . '/approve', array()), 'members do not approve');
+        $this->login($f['uLead']['username']);
+        $this->same($exp, $this->figures($q0, $f['wang'])['day']['expected'], 'pending leave not counted');
+        $l = $this->data($this->request('GET', '/api/v1/perf/leaves', null, array('status' => 'pending')));
+        $this->same(array(1, 1), array($l['pending'], $l['total']));
+        $kinds = array_map(function ($x) { return $x['kind']; }, $this->data($this->request('GET', '/api/v1/todo'))['rows']);
+        $this->ok(in_array('leave_review', $kinds, true), 'in the to-do list');
+        $this->login($f['uZhou']['username']);
+        $this->status(404, $this->request('POST', '/api/v1/perf/leaves/' . $lid . '/approve', array()), 'another department');
+
+        // approve: counted, the person is told; no more changes by the person
+        $this->login($f['uLead']['username']);
+        $this->status(422, $this->request('POST', '/api/v1/perf/leaves/' . $lid . '/reject', array()), 'a reason is needed');
+        $this->status(200, $this->request('POST', '/api/v1/perf/leaves/' . $lid . '/approve', array()));
+        $this->status(409, $this->request('POST', '/api/v1/perf/leaves/' . $lid . '/approve', array()), 'decided already');
+        $this->same($exp - 1, $this->figures($q0, $f['wang'])['day']['expected'], 'approved leave counted');
+        $this->same(0, (int) DB::value('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND biz_type = ? AND biz_id = ? AND read_at IS NULL', array($f['uLead']['id'], 'person_leave', $lid)), 'the leader message is read');
+        $this->ok($this->notified($f['uWang']['id'], 'leave_approved', $lid) === 1, 'person told');
+        $this->login($f['uWang']['username']);
+        $this->status(409, $this->request('PUT', '/api/v1/leave/mine/' . $lid, array('kind' => 'sick', 'start' => $d1, 'end' => $d1)), 'approved: no change');
+        $this->status(409, $this->request('POST', '/api/v1/leave/mine/' . $lid . '/withdraw', array()), 'approved: no withdraw');
+
+        // withdraw while pending; reject with a reason
+        $r2 = $this->data($this->request('POST', '/api/v1/leave/mine', array('kind' => 'sick', 'start' => $d0, 'end' => $d0)))['id'];
+        $this->status(200, $this->request('POST', '/api/v1/leave/mine/' . $r2 . '/withdraw', array()));
+        $r3 = $this->data($this->request('POST', '/api/v1/leave/mine', array('kind' => 'sick', 'start' => $d0, 'end' => $d0)))['id'];
+        $this->login($f['uLead']['username']);
+        $this->status(409, $this->request('POST', '/api/v1/perf/leaves/' . $r2 . '/approve', array()), 'withdrawn');
+        $this->status(200, $this->request('POST', '/api/v1/perf/leaves/' . $r3 . '/reject', array('reason' => '那天有验收，请改期')));
+        $this->ok($this->notified($f['uWang']['id'], 'leave_rejected', $r3) === 1, 'rejection told');
+        $this->same($exp - 1, $this->figures($q0, $f['wang'])['day']['expected'], 'rejected leave not counted');
+        $h = $this->data($this->request('GET', '/api/v1/todo/history', null, array('size' => 20)));
+        $done = array_map(function ($x) { return $x['kind'] . '|' . $x['result']; }, $h['rows']);
+        $this->ok(in_array('leave_review|approved', $done, true) && in_array('leave_review|rejected', $done, true), 'decisions in the history');
+        $this->login($f['uWang']['username']);
+        $this->same('rejected', $this->data($this->request('GET', '/api/v1/leave/mine', null, array('status' => 'rejected')))['rows'][0]['status']);
+
+        // nobody above the unit head: applied leave applies at once; an account without a person cannot apply
+        $this->login($f['uUnit']['username']);
+        $this->same('approved', $this->data($this->request('POST', '/api/v1/leave/mine', array('kind' => 'annual', 'start' => $d0, 'end' => $d0)))['status']);
+        $super = $this->user('super');
+        $this->login($super['username']);
+        $this->same(true, $this->data($this->request('GET', '/api/v1/leave/mine'))['no_person']);
+        $this->status(403, $this->request('POST', '/api/v1/leave/mine', array('kind' => 'annual', 'start' => $d0, 'end' => $d0)));
+    }
+
     public function testPagesAndMenus()
     {
         $this->login($this->f['uWang']['username']);

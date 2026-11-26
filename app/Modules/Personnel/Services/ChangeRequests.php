@@ -25,7 +25,7 @@ class ChangeRequests
         ));
         $p = DB::table('personnel_profiles')->find((int) $personId);
         if ($p) {
-            Notify::send(Notify::reviewersOf('staff.audit', $p), 'change_submitted', array('name' => (string) $p['name']), '/org/staff?tab=review',
+            Notify::send(Notify::reviewersOf('staff.audit', $p), 'change_submitted', array('name' => (string) $p['name']), '/org/staff?tab=review&id=' . (int) $id,
                 'change_request', $id, (int) $userId);
         }
         return $id;

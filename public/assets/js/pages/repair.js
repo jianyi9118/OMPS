@@ -74,6 +74,13 @@
         }, slots: 3 });
       card.appendChild(tw);
       card.appendChild(O.pager(res, function (p) { state.page = p; load(); }));
+      if (focusId) {
+        // a jump (to-do, notification): flash the row; open the request only when it is not in the list
+        var fid = focusId, fr = res.rows.filter(function (x) { return x.id === fid; })[0];
+        focusId = 0;
+        O.focusBar(fr ? fr.asset_no + " " + fr.device : t("device.rep.located"));
+        if (!O.flashRow(fid, card)) show(fid);
+      }
       if (state.tab === "faults" && !mine) card.insertAdjacentHTML("beforeend", O.legend([["eye", t("common.view")], ["wrench", t("device.rep.assign")], ["check", t("device.rep.finish")], ["x", t("device.rep.cancel")]]));
       else card.insertAdjacentHTML("beforeend", '<div class="card-b muted" style="font-size:12.5px">' + O.esc(t("device.rep.total_cost", { cost: res.cost })) + "</div>");
       card.onclick = function (e) { var a = e.target.closest ? e.target.closest("[data-dev]") : null; if (a) { e.preventDefault(); D.detail(+a.getAttribute("data-dev"), { tab: 4 }); } };
@@ -170,6 +177,6 @@
     M = m;
     shell();
     render();
-    if (focusId) { show(focusId); O.focusBar(t("device.rep.located")); focusId = 0; }
+    // a jump: load() flashes the row, or opens the request when it is not in the list
   }, O.failed);
 })();

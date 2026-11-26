@@ -87,5 +87,6 @@
   "staff.err.remove_self": "不能移出自己",
   "staff.err.not_active": "只能移出在职人员",
   "staff.err.has_active_account": "“{name}”还有启用中的登录账号，您没有用户管理权限，不能一起停用。请联系有用户管理权限的人处理。",
-  "staff.remove_impact": "他还有 {plans} 项未完成的计划、{devices} 台在用设备，需要另行安排。"
+  "staff.remove_impact": "他还有 {plans} 项未完成的计划、{devices} 台在用设备，需要另行安排。",
+  "staff.located_change": "{name} 的资料修改"
 }

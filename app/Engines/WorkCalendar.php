@@ -5,7 +5,8 @@ use Omps\Core\Settings;
 
 /**
  * Workdays and work hours (design §13.3): reminders are only sent in work time. Defaults:
- * Monday–Friday, 08:30–17:30, changeable in system settings. All values are Unix timestamps in the
+ * Monday–Friday, 08:30–17:30, changeable in system settings; holidays and make-up workdays
+ * (系统设置 → 节假日与调休) override the weekday rule. All values are Unix timestamps in the
  * application time zone.
  */
 class WorkCalendar
@@ -16,9 +17,12 @@ class WorkCalendar
     public $start;
     /** @var int */
     public $end;
+    /** @var array 'Y-m-d' => true (make-up workday) | false (holiday), from 系统设置 → 节假日与调休 */
+    public $overrides = array();
 
-    public function __construct(array $days, $start, $end)
+    public function __construct(array $days, $start, $end, array $overrides = array())
     {
+        $this->overrides = $overrides;
         $this->days = array_values(array_unique(array_map('intval', $days)));
         if (!$this->days) {
             $this->days = array(1, 2, 3, 4, 5);
@@ -39,7 +43,27 @@ class WorkCalendar
                 $days[] = (int) $d;
             }
         }
-        return new self($days, (string) Settings::get('work_start', '08:30'), (string) Settings::get('work_end', '17:30'));
+        return new self($days, (string) Settings::get('work_start', '08:30'), (string) Settings::get('work_end', '17:30'), self::holidayMap());
+    }
+
+    /** Holidays and make-up workdays day by day; a make-up workday wins over a holiday on the same day. */
+    public static function holidayMap()
+    {
+        $map = array();
+        try {
+            $rows = \Omps\Database\DB::select("SELECT kind, start_date, end_date FROM holidays ORDER BY kind = 'work', start_date");
+        } catch (\Exception $e) {
+            return $map; // before the migration has run
+        }
+        foreach ($rows as $r) {
+            $ts = strtotime($r['start_date'] . ' 12:00:00');
+            $end = (string) $r['end_date'];
+            for ($i = 0; $i < 400 && date('Y-m-d', $ts) <= $end; $i++) {
+                $map[date('Y-m-d', $ts)] = (string) $r['kind'] === 'work';
+                $ts = self::addDays($ts, 1);
+            }
+        }
+        return $map;
     }
 
     /** "HH:MM" → minutes after midnight ($default when invalid). */
@@ -77,6 +101,12 @@ class WorkCalendar
 
     public function isWorkday($ts)
     {
+        if ($this->overrides) {
+            $d = date('Y-m-d', $ts);
+            if (isset($this->overrides[$d])) {
+                return $this->overrides[$d];
+            }
+        }
         return in_array((int) date('N', $ts), $this->days, true);
     }
 

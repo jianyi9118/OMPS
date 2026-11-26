@@ -625,3 +625,6 @@ code.ph{font-family:var(--mono);font-size:12px;background:var(--panel-2);border:
 .ps-sort:hover,.ps-sort.on{color:var(--primary)}
 .ps-tbl tfoot td{background:var(--panel-2);border-top:1px solid var(--line)}
 .ps-rules{font-size:12.5px;line-height:1.65}
+/* 系统设置 → 节假日与调休 */
+.hol-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.hol-bar .sp{flex:1}

@@ -8,7 +8,7 @@
   var state = { tab: O.qs("tab") === "done" ? "done" : "pending", page: 1 };
   var built = "";
 
-  var KIND_PILL = { issue_order: "warn", issue_read: "", note_read: "", perf_review: "", change_review: "", perf_returned: "bad", perf_write: "", staff_assign: "warn" };
+  var KIND_PILL = { issue_order: "warn", issue_read: "", note_read: "", perf_review: "", leave_review: "", change_review: "", perf_returned: "bad", perf_write: "", staff_assign: "warn" };
   var RESULT_PILL = { done: "ok", read: "", approved: "ok", returned: "warn", assigned: "info", fixed: "ok", cancelled: "", confirmed: "ok", ignored: "" };
 
   function kindCol() {

@@ -4,7 +4,7 @@
 
 For: developers who maintain or extend OMPS.
 
-> The column lists are generated from the actual database (up to migration `2026_11_30_000014`: 65 tables, 688 columns); table and key column descriptions are written by hand. Update this file after changing the schema.
+> The column lists are generated from the actual database (up to migration `2026_12_02_000016`: 67 tables, 713 columns); table and key column descriptions are written by hand. Update this file after changing the schema.
 
 ## 1. Overview
 
@@ -72,6 +72,7 @@ erDiagram
 | [`menus`](#menus) | The side menu tree: route, required permission, device-admin only; user_sort / enabled are changes made in Menu management |
 | [`user_prefs`](#user-prefs) | Personal preferences (quiet hours, pop-up notices...) |
 | [`backup_logs`](#backup-logs) | One row per backup: kind (manual, auto, pre-restore, pre-upgrade), result, sizes, checksum |
+| [`holidays`](#holidays) | Holidays and make-up workdays (Settings → Holidays and make-up workdays): kind off = day off (no workday), work = make-up workday |
 
 **Accounts and permissions**
 
@@ -117,6 +118,7 @@ erDiagram
 | [`plan_assignments`](#plan-assignments) | Who a plan is assigned to (several people allowed) |
 | [`performance_reports`](#performance-reports) | Results: one per plan and assignee |
 | [`performance_versions`](#performance-versions) | Every save, submit, approval, edit-and-approve, return and withdrawal of a result |
+| [`person_leaves`](#person-leaves) | Leave of a person, whole days: applied for in My leave (status pending) and approved or rejected by the leader who reviews the person's results; leave a leader records directly is approved at once |
 | [`reports`](#reports) | Comprehensive reports (generated from conditions or written by hand); only the creator sees them |
 | [`report_versions`](#report-versions) | Versions of a report (content snapshots) |
 | [`report_exports`](#report-exports) | Prints and downloads of reports |
@@ -343,6 +345,26 @@ One row per backup: kind (manual, auto, pre-restore, pre-upgrade), result, sizes
 | `created_by` | bigint(20) unsigned | yes |  | Created by (users.id) |
 
 - Indexes: index `idx_started`(started_at); primary `PRIMARY`(id)
+
+<a id="holidays"></a>
+#### `holidays`
+
+Holidays and make-up workdays (Settings → Holidays and make-up workdays): kind off = day off (no workday), work = make-up workday. The work calendar uses them for reminder times and for the reports expected in the execution statistics.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigint(20) unsigned AUTO_INCREMENT |  |  | Primary key, auto increment |
+| `org_id` | bigint(20) unsigned |  | 1 | Organization (always 1 for now; reserved for several units) |
+| `name` | varchar(50) |  |  |  |
+| `kind` | enum('off','work') |  | off | off = day off / work = make-up workday |
+| `start_date` | date |  |  |  |
+| `end_date` | date |  |  |  |
+| `created_at` | datetime |  |  | Created at |
+| `created_by` | bigint(20) unsigned | yes |  | Created by (users.id) |
+| `updated_at` | datetime | yes |  | Updated at |
+| `updated_by` | bigint(20) unsigned | yes |  | Updated by (users.id) |
+
+- Indexes: index `idx_dates`(start_date,end_date); primary `PRIMARY`(id)
 
 ### Accounts and permissions
 
@@ -909,6 +931,31 @@ Every save, submit, approval, edit-and-approve, return and withdrawal of a resul
 | `created_at` | datetime |  |  | Created at |
 
 - Indexes: index `idx_report`(report_id,version_no); primary `PRIMARY`(id)
+
+<a id="person-leaves"></a>
+#### `person_leaves`
+
+Leave of a person, whole days: applied for in My leave (status pending) and approved or rejected by the leader who reviews the person's results; leave a leader records directly is approved at once. Only approved leave counts: no daily report is expected and no daily reminder is sent on a day of leave; when a whole period is leave, its weekly to annual report is not expected either.
+
+| Column | Type | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | bigint(20) unsigned AUTO_INCREMENT |  |  | Primary key, auto increment |
+| `org_id` | bigint(20) unsigned |  | 1 | Organization (always 1 for now; reserved for several units) |
+| `person_id` | bigint(20) unsigned |  |  | Person (personnel_profiles.id) |
+| `kind` | varchar(20) |  |  | annual / sick / personal / comp (time off in lieu) / marriage / maternity (or paternity) / bereavement / other |
+| `start_date` | date |  |  |  |
+| `end_date` | date |  |  |  |
+| `note` | varchar(200) | yes |  | Note |
+| `status` | enum('pending','approved','rejected','withdrawn') |  | approved | pending / approved / rejected / withdrawn |
+| `reviewed_by` | bigint(20) unsigned | yes |  |  |
+| `reviewed_at` | datetime | yes |  |  |
+| `review_comment` | varchar(200) | yes |  | Reason for rejecting |
+| `created_at` | datetime |  |  | Created at |
+| `created_by` | bigint(20) unsigned | yes |  | Created by (users.id) |
+| `updated_at` | datetime | yes |  | Updated at |
+| `updated_by` | bigint(20) unsigned | yes |  | Updated by (users.id) |
+
+- Indexes: index `idx_dates`(start_date,end_date); index `idx_person`(person_id,start_date); index `idx_status`(status); primary `PRIMARY`(id)
 
 <a id="reports"></a>
 #### `reports`

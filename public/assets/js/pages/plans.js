@@ -132,19 +132,27 @@
       '<span class="muted" style="flex:1;min-width:220px">' + O.esc(t(META.manager ? "plan.mine_hint_leader" : "plan.mine_hint")) + "</span>";
   }
 
+  var jumpId = 0; // plan to flash after the list loads
+
   function load() {
     O.api("GET", "/api/v1/plans", null, { mode: mode, per: state.per === "all" ? "" : state.per, dept_id: state.dept_id, person_id: state.person_id, kw: state.kw }).then(function (res) {
       rows = res.rows;
       summary();
       render();
+      if (jumpId) {
+        // a jump (to-do, notification): flash the plan's row; open it only when it is not in the list
+        var id = jumpId, p = rows.filter(function (x) { return x.id === id; })[0];
+        jumpId = 0;
+        if (p && O.flashRow(id)) O.focusBar(p.title);
+        else O.plan.openDetail(id).then(null, function () { /* not visible any more */ });
+      }
     }, O.failed);
   }
 
   O.plan.meta().then(function (m) {
     META = m;
+    jumpId = +O.qs("plan") || 0;
     shell();
     load();
-    var focus = +O.qs("plan");
-    if (focus) O.plan.openDetail(focus).then(null, function () { /* not visible any more */ });
   }, O.failed);
 })();

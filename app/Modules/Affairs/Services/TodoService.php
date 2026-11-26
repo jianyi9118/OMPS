@@ -11,7 +11,7 @@ use Omps\Engines\Permission;
  */
 class TodoService
 {
-    const KINDS = array('issue_order', 'issue_read', 'note_read', 'perf_review', 'change_review', 'perf_returned', 'perf_write', 'staff_assign',
+    const KINDS = array('issue_order', 'issue_read', 'note_read', 'perf_review', 'leave_review', 'change_review', 'perf_returned', 'perf_write', 'staff_assign',
         'device_repair', 'device_fault', 'device_anomaly');
     const LIMIT = 50;
 
@@ -65,6 +65,20 @@ class TodoService
             }
         }
 
+        // leave applications waiting for my approval (same people as the results review)
+        if (Permission::can($user, 'perf.audit') && DB::select("SHOW TABLES LIKE 'person_leaves'")) {
+            $q = DB::table('person_leaves l')->join('personnel_profiles pp', 'pp.id', '=', 'l.person_id')->whereNull('pp.deleted_at')->where('l.status', 'pending')
+                ->select(array('l.id', 'l.kind', 'l.start_date', 'l.end_date', 'l.created_at', 'pp.name'));
+            Permission::scopePersonnel($q, $user, 'pp');
+            if ($user['person_id'] !== null) {
+                $q->where('l.person_id', '<>', (int) $user['person_id']);
+            }
+            foreach ($q->orderBy('l.created_at')->limit(self::LIMIT)->get() as $r) {
+                $rows[] = array('kind' => 'leave_review', 'params' => array('name' => (string) $r['name'], 'kind' => array('t' => 'leave.kind.' . $r['kind']),
+                    'start' => (string) $r['start_date'], 'end' => (string) $r['end_date']), 'link' => '/performance/review?view=leaves&id=' . (int) $r['id'], 'at' => (string) $r['created_at']);
+            }
+        }
+
         // profile changes waiting for my review
         if (Permission::can($user, 'staff.audit')) {
             $q = DB::table('profile_change_requests c')->join('personnel_profiles p', 'p.id', '=', 'c.person_id')->whereNull('p.deleted_at')->where('c.status', 'pending')
@@ -74,7 +88,7 @@ class TodoService
                 $q->where('c.person_id', '<>', (int) $user['person_id']);
             }
             foreach ($q->orderBy('c.submitted_at')->limit(self::LIMIT)->get() as $r) {
-                $rows[] = array('kind' => 'change_review', 'params' => array('name' => (string) $r['name']), 'link' => '/org/staff?tab=review', 'at' => (string) $r['submitted_at']);
+                $rows[] = array('kind' => 'change_review', 'params' => array('name' => (string) $r['name']), 'link' => '/org/staff?tab=review&id=' . (int) $r['id'], 'at' => (string) $r['submitted_at']);
             }
         }
 
@@ -214,11 +228,22 @@ class TodoService
                 'result' => (string) $r['status'], 'at' => (string) $r['at'], 'link' => '/performance/review?focus=' . (int) $r['id']);
         });
 
+        // leave applications I decided (records a leader made directly are not applications)
+        if (DB::select("SHOW TABLES LIKE 'person_leaves'")) {
+            $take("SELECT l.id, l.kind, l.status, l.start_date, l.end_date, l.reviewed_at AS at, p.name FROM person_leaves l JOIN personnel_profiles p ON p.id = l.person_id
+                WHERE l.reviewed_by = ? AND l.status IN ('approved', 'rejected') AND l.created_by <> l.reviewed_by AND l.person_id <> ? AND l.reviewed_at IS NOT NULL",
+                array($uid, $me), array('name'), function ($r) {
+                return array('kind' => 'leave_review', 'params' => array('name' => (string) $r['name'], 'kind' => array('t' => 'leave.kind.' . $r['kind']),
+                    'start' => (string) $r['start_date'], 'end' => (string) $r['end_date']), 'result' => (string) $r['status'], 'at' => (string) $r['at'],
+                    'link' => '/performance/review?view=leaves&id=' . (int) $r['id']);
+            });
+        }
+
         // profile changes I reviewed
         $take("SELECT c.id, c.status, c.reviewed_at AS at, p.name FROM profile_change_requests c JOIN personnel_profiles p ON p.id = c.person_id
             WHERE c.reviewed_by = ? AND c.status IN ('approved', 'returned') AND c.person_id <> ? AND c.reviewed_at IS NOT NULL", array($uid, $me), array('name'), function ($r) {
             return array('kind' => 'change_review', 'params' => array('name' => (string) $r['name']), 'result' => (string) $r['status'], 'at' => (string) $r['at'],
-                'link' => '/org/staff?tab=review');
+                'link' => '/org/staff?tab=review&id=' . (int) $r['id']);
         });
 
         if (class_exists('Omps\\Modules\\Device\\Services\\DeviceService') && DB::select("SHOW TABLES LIKE 'device_faults'")) {

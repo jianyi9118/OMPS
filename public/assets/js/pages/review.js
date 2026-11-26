@@ -6,13 +6,15 @@
   var state = { tab: "pending", person_id: "", page: 1 };
   var data = null, picked = {};
 
-  /* two sub-pages: review (pending / reviewed) and statistics (assets/js/pages/perfstats.js) */
-  var page = O.qs("view") === "stats" ? "stats" : "review", built = { review: false, stats: false };
+  /* sub-pages: review (pending / reviewed), statistics (perfstats.js), leave (leaves.js) */
+  var PAGES = [["review", "perf.st.tab_review"], ["stats", "perf.st.tab"], ["leaves", "leave.tab"]];
+  var page = O.qs("view") === "stats" || O.qs("view") === "leaves" ? O.qs("view") : "review", built = {};
+  var jumpId = 0; // result to flash after the list loads (-1: wait for its tab)
   function frame() {
     view.innerHTML = '<div class="subnav" style="border:1px solid var(--line);border-radius:4px" id="rv_tabs" role="tablist">' +
-      [["review", t("perf.st.tab_review")], ["stats", t("perf.st.tab")]].map(function (x) {
-        return '<button type="button" role="tab" data-page="' + x[0] + '">' + O.esc(x[1]) + "</button>"; }).join("") +
-      '</div><div id="rv_page_review" style="display:none;gap:12px"></div><div id="rv_page_stats" style="display:none;gap:12px"></div>';
+      PAGES.map(function (x) {
+        return '<button type="button" role="tab" data-page="' + x[0] + '">' + O.esc(t(x[1])) + "</button>"; }).join("") + "</div>" +
+      PAGES.map(function (x) { return '<div id="rv_page_' + x[0] + '" style="display:none;gap:12px"></div>'; }).join("");
     document.getElementById("rv_tabs").addEventListener("click", function (e) {
       var b = e.target.closest ? e.target.closest("[data-page]") : null;
       if (b) show(b.getAttribute("data-page"));
@@ -23,18 +25,18 @@
     var bs = document.querySelectorAll("#rv_tabs [data-page]");
     for (var i = 0; i < bs.length; i++) { var on = bs[i].getAttribute("data-page") === p; bs[i].classList.toggle("on", on); bs[i].setAttribute("aria-selected", on ? "true" : "false"); }
     // each sub-page shows alone (the inline display:grid would override the hidden attribute)
-    document.getElementById("rv_page_review").style.display = p === "review" ? "grid" : "none";
-    document.getElementById("rv_page_stats").style.display = p === "stats" ? "grid" : "none";
+    PAGES.forEach(function (x) { document.getElementById("rv_page_" + x[0]).style.display = p === x[0] ? "grid" : "none"; });
     if (window.history && history.replaceState) {
       var u = new URL(window.location.href);
-      if (p === "stats") u.searchParams.set("view", "stats"); else u.searchParams.delete("view");
+      if (p !== "review") u.searchParams.set("view", p); else u.searchParams.delete("view");
       u.searchParams.delete("focus");
       history.replaceState(null, "", u.pathname + u.search + u.hash);
     }
     if (built[p]) return;
     built[p] = true;
     if (p === "stats") O.perfStats.mount(document.getElementById("rv_page_stats"));
-    else { shell(); load(); }
+    else if (p === "leaves") O.perfLeaves.mount(document.getElementById("rv_page_leaves"));
+    else { shell(); if (!jumpId) load(); }
   }
 
   function shell() {
@@ -127,6 +129,12 @@
       res.rows.forEach(function (r) { ids[r.id] = true; });
       Object.keys(picked).forEach(function (k) { if (!ids[k]) delete picked[k]; });
       render();
+      // a jump (to-do, notification): flash the row; open the result only when it is not on this page
+      if (jumpId > 0) {
+        var id = jumpId;
+        jumpId = 0;
+        if (!O.flashRow(id, document.getElementById("rv_card"))) detail(id);
+      }
     }, O.failed);
   }
 
@@ -200,14 +208,15 @@
   frame();
   O.plan.meta().then(function () {
     var focus = +O.qs("focus");
+    if (focus) jumpId = -1; // the list loads once the result's tab is known
     show(focus ? "review" : page);
     if (focus) {
       O.api("GET", "/api/v1/perf/reviews/" + focus).then(function (r) {
-        if (r.status !== "submitted") state.tab = "done";
+        state.tab = r.status === "submitted" ? "pending" : "done";
         O.focusBar(t("perf.rv.located", { name: r.person, title: r.plan.title }));
-        if (state.tab === "done") load();
-        detail(focus);
-      }, O.failed);
+        jumpId = focus;
+        load();
+      }, function (e) { jumpId = 0; load(); O.failed(e); });
     }
   }, O.failed);
 })();

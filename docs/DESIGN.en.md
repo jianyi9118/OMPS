@@ -1,6 +1,6 @@
 # OMPS Design Document
 
-Design document for the Organization Management Platform (OMPS · Organization Management & Performance System). Design version **v0.48**, 2026-11-26.
+Design document for the Organization Management Platform (OMPS · Organization Management & Performance System). Design version **v0.49**, 2026-11-26.
 
 This document explains **why the system is designed the way it is and what rules each feature follows**: architecture, permissions, plans and results, reports, reminders, devices, customization, multiple languages, interface conventions, and the implementation record of each phase. Other documents:
 
@@ -981,7 +981,7 @@ Department heads handle results submitted by members here: they can edit and app
 
 #### 9.5.1 Execution statistics (v0.48)
 
-The "Results review" menu item is renamed **Review & statistics**; the page has two sub-pages: **Review** and **Statistics**. Statistics covers the people in the reviewer's scope (with a login, not the reviewer), per person: how many assigned plans were executed and how many were not, how many daily, weekly, monthly, quarterly and annual reports were due, submitted and missing, and the percentages. Every figure can be opened to see exactly which ones.
+The "Results review" menu item is renamed **Review & statistics**; the page has three sub-pages: **Review**, **Statistics** and **Leave**. Statistics covers the people in the reviewer's scope (with a login, not the reviewer), per person: how many assigned plans were executed and how many were not, how many daily, weekly, monthly, quarterly and annual reports were due, submitted and missing, and the percentages. Every figure can be opened to see exactly which ones.
 
 | Part | Content |
 |---|---|
@@ -1001,6 +1001,10 @@ The "Results review" menu item is renamed **Review & statistics**; the page has 
 | Submitted, missing | Submitted and approved count as submitted (early ones too); draft, returned, withdrawn, not written and no plan count as missing |
 | Colours | 90% and above green, 60%–90% amber, below 60% red; the numbers are always shown, never colour alone |
 | Permission | Same as results review (`perf.audit`): department heads see their department and its sub-departments, unit heads the whole unit |
+| Holidays and make-up workdays | Set by the super admin per year in System → Settings → Holidays and make-up workdays: days off are not workdays, make-up workdays (e.g. a weekend worked in exchange) are. Changes apply at once to reminders and statistics |
+| Leave applications | Everyone applies in My affairs → My leave (type, dates, reason; whole days) and can change or withdraw the application until it is decided. The leader who reviews the person's results gets a notification and a to-do, and approves or rejects it in Review & statistics → Leave → Waiting (a reason is required to reject); the person is told the result. Unit heads have nobody above them, so their leave applies at once |
+| Recorded by the leader | Leaders can also record leave for their people directly in Leave; it applies at once and can be changed or deleted. Waiting and approved leave of one person cannot overlap |
+| What leave does | Only approved leave counts: no daily report is expected and no daily reminder is sent on a day of leave; when the whole week, month, quarter or year is leave, that report is not expected either |
 
 ### 9.6 System rules (no user settings needed)
 
@@ -1432,7 +1436,7 @@ Trigger times are **not entered as text**; they are chosen from drop-downs: base
 
 - **Escalation** uses the same structure: no escalation / still unhandled after N [unit] → target / on first becoming overdue → target.
 - **See exact times while editing:** "Exact time examples" below the form calculates the date and time of each trigger point for a sample object, e.g. "With a deadline of 11-30 (Mon) 17:00: 1 day before deadline at 09:00 → 11-27 (Fri) 09:00; 2 hours before deadline → 11-30 (Mon) 15:00". Hovering over a trigger time in the list also shows example times.
-- **Working-day rule:** reminders are sent only on working days (Monday to Friday, working hours 08:30–17:30, changeable in Settings). If a time falls on a weekend, "before due date" triggers move forward to the previous working day and all others move to the next working day; "working hours" count only working time.
+- **Working-day rule:** reminders are sent only on working days (Monday to Friday, working hours 08:30–17:30, changeable in Settings; none on holidays, as usual on make-up workdays, see Settings → Holidays and make-up workdays; no daily-report reminder for people on leave that day). If a time falls on a weekend, "before due date" triggers move forward to the previous working day and all others move to the next working day; "working hours" count only working time.
 - **Checks:** at least one trigger time; amount greater than 0; triggers in days must have a time of day; no duplicate trigger times within one rule; at least one reminder target.
 - **How it is stored:** each trigger point is stored as one row of structured data (mode, amount, unit, time of day, weekday / day of month, overdue repeat mode); the scheduled task calculates from this and does not parse text.
 
@@ -2072,6 +2076,7 @@ A check against the design found that the "Workbench (shown by role)" in section
 
 Each design change made during development, listed by version from newest to oldest.
 
+- **v0.49 update:** Besides the weekdays, workdays now take **holidays and make-up workdays** (Settings) into account, and **leave** is handled: people apply in My affairs → My leave and the leader who reviews their results approves it in Review & statistics → Leave (or records it directly). No daily report is expected on holidays and days of leave, and reminders skip them; when a whole period is leave, its weekly to annual report is not expected either ([9.5.1](#perf-stats), [13.3](#remind)). A jump from a to-do or a notification to a list page always shows the "Showing" bar and flashes the row; the details open only when the record is not in the current list.
 - **v0.48 update:** The "Results review" menu item is renamed "Review & statistics" and gets a "Statistics" sub-page: per person, how assigned plans were executed and how many daily, weekly, monthly, quarterly and annual reports were due, submitted and missing, with percentages; every figure opens its list; filters for period, department and person; Excel export ([9.5.1](#perf-stats)).
 - **v0.47 update:** Any language can be disabled (including Simplified Chinese and the default language), but at least one enabled language must remain. When the default language is disabled, the system automatically makes the first enabled language in the language list the default language and says which one it switched to; for example, after adding and enabling Japanese and then disabling Simplified Chinese and English, Japanese becomes the default language. Simplified Chinese is the original text of all translations, so it cannot be deleted, only disabled; names created while it is disabled (fields, statistics pages, etc.) have text only in the enabled languages, and Simplified Chinese can be re-enabled only after these translations are filled in ([section 16](#i18n)).
 - **v0.46 update:** The "Backups" page adds "Automatic database clean-up": logs (operation log, login log, device usage records, hardware snapshots) and the audit log each get a retention period (1 month / 3 months / 6 months / 1 year / 3 years / Keep forever, default Keep forever), and backup retention changes to 7 days / 14 days / 1 month / 3 months / 6 months / 1 year / 3 years / Keep forever. Clean-up runs automatically once a day with the scheduled task (or with an open page) and deletes in batches; each device's latest hardware snapshot and any snapshot referenced by an anomaly record are kept; read notifications are kept for at most six months; business data such as plans, results, staff and devices is never deleted automatically. Saving a shorter period asks for confirmation first and cleans up immediately; a warning is shown when the audit log period is less than 1 year. The page shows the space used by the database and the logs, and the result of the last clean-up ([phase 9](#phase9done)).

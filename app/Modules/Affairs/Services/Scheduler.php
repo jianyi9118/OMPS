@@ -328,7 +328,20 @@ class Scheduler
         foreach ($plans as $p) {
             $byId[(int) $p['id']] = $p;
         }
-        foreach (self::missingResults(array_keys($byId)) as $pid => $people) {
+        $missing = self::missingResults(array_keys($byId));
+        // nobody is reminded of a daily report on a day of leave (审核与统计 → 请假登记)
+        $ids = array();
+        foreach ($missing as $people) {
+            foreach ($people as $person => $_) {
+                $ids[$person] = $person;
+            }
+        }
+        $off = \Omps\Modules\Performance\Services\LeaveService::days(array_values($ids), $today, $today);
+        foreach ($missing as $pid => $people) {
+            $people = array_diff_key($people, $off);
+            if (!$people) {
+                continue;
+            }
             self::fire($rule, 'plan#' . $pid, array_values($people), null, $rule['triggers'], 0, 'remind_perf_daily', array('title' => (string) $byId[$pid]['title']),
                 '/plans/mine?plan=' . $pid, 'plan', $pid);
         }
@@ -386,7 +399,7 @@ class Scheduler
         foreach ($rows as $r) {
             $to = Notify::reviewersOf('staff.audit', array('id' => (int) $r['person_id'], 'dept_id' => $r['dept_id']));
             self::fire($rule, 'change#' . (int) $r['id'], $to, self::ts($r['submitted_at']), $rule['triggers'], 0, 'remind_change',
-                array('name' => (string) $r['name'], 'at' => substr((string) $r['submitted_at'], 0, 16)), '/org/staff?tab=review', 'change_request', (int) $r['id']);
+                array('name' => (string) $r['name'], 'at' => substr((string) $r['submitted_at'], 0, 16)), '/org/staff?tab=review&id=' . (int) $r['id'], 'change_request', (int) $r['id']);
         }
     }
 }

@@ -4,7 +4,7 @@
 
 面向：维护和二次开发 OMPS 的技术人员。
 
-> 本文的字段清单由实际数据库结构生成（截至建表脚本 `2026_11_30_000014`，共 65 张表、688 个字段），表和关键字段的用途为人工说明。修改表结构后请同步更新本文。
+> 本文的字段清单由实际数据库结构生成（截至建表脚本 `2026_12_02_000016`，共 67 张表、713 个字段），表和关键字段的用途为人工说明。修改表结构后请同步更新本文。
 
 ## 1. 概述
 
@@ -72,6 +72,7 @@ erDiagram
 | [`menus`](#menus) | 左侧菜单树：路由、所需权限、是否只给兼任设备管理员；user_sort / enabled 是“菜单管理”中的调整。 |
 | [`user_prefs`](#user-prefs) | 个人偏好（免打扰时段、弹窗提醒等）。 |
 | [`backup_logs`](#backup-logs) | 每份备份的记录：类型（手动、自动、恢复前、升级前）、结果、大小、校验值。 |
+| [`holidays`](#holidays) | 节假日与调休（系统设置 → 节假日与调休）：kind = off 放假（不算工作日），work 调休上班（算工作日）。 |
 
 **账号与权限**
 
@@ -117,6 +118,7 @@ erDiagram
 | [`plan_assignments`](#plan-assignments) | 计划分配给哪些人（可多人）。 |
 | [`performance_reports`](#performance-reports) | 业绩：每个计划每个执行人一份。 |
 | [`performance_versions`](#performance-versions) | 业绩的每次保存、提交、审核、修改并通过、退回、撤回。 |
+| [`person_leaves`](#person-leaves) | 人员请假，按整天：本人在“我的请假”中申请（status = pending），审核其业绩的负责人批准或不批准；负责人直接登记的立即批准。 |
 | [`reports`](#reports) | 综合报告（按条件生成或手写），只有创建人能看到。 |
 | [`report_versions`](#report-versions) | 报告的各个版本（内容快照）。 |
 | [`report_exports`](#report-exports) | 报告的打印和下载记录。 |
@@ -343,6 +345,26 @@ erDiagram
 | `created_by` | bigint(20) unsigned | 是 |  | 创建人（users.id） |
 
 - 索引: 普通 `idx_started`(started_at); 主键 `PRIMARY`(id)
+
+<a id="holidays"></a>
+#### `holidays`
+
+节假日与调休（系统设置 → 节假日与调休）：kind = off 放假（不算工作日），work 调休上班（算工作日）。工作日历据此计算提醒时间和执行统计中应交的日报。
+
+| 字段 | 类型 | 可空 | 默认 | 说明 |
+|---|---|---|---|---|
+| `id` | bigint(20) unsigned AUTO_INCREMENT |  |  | 主键，自增 |
+| `org_id` | bigint(20) unsigned |  | 1 | 单位编号（目前固定为 1，预留多单位） |
+| `name` | varchar(50) |  |  |  |
+| `kind` | enum('off','work') |  | off | off 放假 / work 调休上班 |
+| `start_date` | date |  |  |  |
+| `end_date` | date |  |  |  |
+| `created_at` | datetime |  |  | 创建时间 |
+| `created_by` | bigint(20) unsigned | 是 |  | 创建人（users.id） |
+| `updated_at` | datetime | 是 |  | 修改时间 |
+| `updated_by` | bigint(20) unsigned | 是 |  | 修改人（users.id） |
+
+- 索引: 普通 `idx_dates`(start_date,end_date); 主键 `PRIMARY`(id)
 
 ### 账号与权限
 
@@ -909,6 +931,31 @@ erDiagram
 | `created_at` | datetime |  |  | 创建时间 |
 
 - 索引: 普通 `idx_report`(report_id,version_no); 主键 `PRIMARY`(id)
+
+<a id="person-leaves"></a>
+#### `person_leaves`
+
+人员请假，按整天：本人在“我的请假”中申请（status = pending），审核其业绩的负责人批准或不批准；负责人直接登记的立即批准。只有已批准的请假计入：请假日不要求交日报、不发日报提醒；整个周期都在请假的，周报至年报也不要求。
+
+| 字段 | 类型 | 可空 | 默认 | 说明 |
+|---|---|---|---|---|
+| `id` | bigint(20) unsigned AUTO_INCREMENT |  |  | 主键，自增 |
+| `org_id` | bigint(20) unsigned |  | 1 | 单位编号（目前固定为 1，预留多单位） |
+| `person_id` | bigint(20) unsigned |  |  | 人员（personnel_profiles.id） |
+| `kind` | varchar(20) |  |  | annual 年假 / sick 病假 / personal 事假 / comp 调休 / marriage 婚假 / maternity 产假、陪产假 / bereavement 丧假 / other 其他 |
+| `start_date` | date |  |  |  |
+| `end_date` | date |  |  |  |
+| `note` | varchar(200) | 是 |  | 备注 |
+| `status` | enum('pending','approved','rejected','withdrawn') |  | approved | pending 待审批 / approved 已批准 / rejected 未批准 / withdrawn 已撤回 |
+| `reviewed_by` | bigint(20) unsigned | 是 |  |  |
+| `reviewed_at` | datetime | 是 |  |  |
+| `review_comment` | varchar(200) | 是 |  | 不批准的原因 |
+| `created_at` | datetime |  |  | 创建时间 |
+| `created_by` | bigint(20) unsigned | 是 |  | 创建人（users.id） |
+| `updated_at` | datetime | 是 |  | 修改时间 |
+| `updated_by` | bigint(20) unsigned | 是 |  | 修改人（users.id） |
+
+- 索引: 普通 `idx_dates`(start_date,end_date); 普通 `idx_person`(person_id,start_date); 普通 `idx_status`(status); 主键 `PRIMARY`(id)
 
 <a id="reports"></a>
 #### `reports`

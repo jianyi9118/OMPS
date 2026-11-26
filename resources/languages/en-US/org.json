@@ -87,5 +87,6 @@
   "staff.err.remove_self": "You cannot remove yourself",
   "staff.err.not_active": "Only active people can be removed",
   "staff.err.has_active_account": "“{name}” still has an active login account, and you are not allowed to manage accounts. Ask someone who manages users.",
-  "staff.remove_impact": "This person still has {plans} unfinished plan(s) and holds {devices} device(s); arrange them separately."
+  "staff.remove_impact": "This person still has {plans} unfinished plan(s) and holds {devices} device(s); arrange them separately.",
+  "staff.located_change": "Profile change of {name}"
 }

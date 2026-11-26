@@ -25,7 +25,6 @@
   "auth.password_letters_digits": "The password must contain both letters and digits",
   "auth.password_is_username": "The password cannot be the same as the user name",
   "auth.password_same": "The new password must differ from the current one",
-
   "user.search": "User name / name",
   "user.all_roles": "Role: all",
   "user.all_status": "Status: all",
@@ -64,7 +63,6 @@
   "user.err.self_role_status": "You cannot change your own role or disable yourself",
   "user.err.self_logout": "You cannot sign yourself out everywhere; use Sign out",
   "user.err.self_delete": "You cannot delete your own account",
-
   "role.list_title": "Roles",
   "role.count": "{builtin} built-in · {custom} custom",
   "role.add": "New role",
@@ -104,7 +102,6 @@
   "role.unit_head": "Unit head",
   "role.dept_head": "Department head",
   "role.member": "Member",
-
   "perm.group.users": "User accounts",
   "perm.group.org": "Organization",
   "perm.group.staff": "Staff records",
@@ -118,7 +115,6 @@
   "perm.action.audit": "Review",
   "perm.action.assign": "Assign",
   "perm.action.sensitive": "Sensitive",
-
   "settings.group_unit": "Unit",
   "settings.unit_name": "Unit name",
   "settings.unit_address": "Address",
@@ -134,7 +130,6 @@
   "settings.password_min_length": "Minimum password length",
   "settings.range": "Range {min}–{max}",
   "settings.err.language_disabled": "Only an enabled language can be the default",
-
   "log.tab.operation": "Activity log",
   "log.tab.audit": "Audit log",
   "log.tab.login": "Sign-in log",
@@ -197,5 +192,6 @@
   "log.action.access_denied": "Out-of-scope access refused",
   "log.agent": "Browser",
   "log.search": "Search logs",
-  "user.field.created_at": "Created"
+  "user.field.created_at": "Created",
+  "perm.action.leave": "Apply for leave"
 }

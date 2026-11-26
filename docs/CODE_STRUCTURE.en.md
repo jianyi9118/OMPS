@@ -124,7 +124,7 @@ sequenceDiagram
 | `Retention.php` | Automatic clean-up: deletes old logs and audit logs after their periods (business data is never deleted) |
 | `CustomFields.php` | Reading, writing, searching and exporting custom fields |
 | `Documents.php` / `DocLayouts.php` | Word documents for reports and personnel forms (built-in layouts or uploaded templates) |
-| `WorkCalendar.php` | Work days and hours (reminders are sent in work hours only) |
+| `WorkCalendar.php` | Work days and hours (by weekday, adjusted by holidays and make-up workdays; reminders are sent in work hours only) |
 
 ## 6. Business modules `app/Modules`
 
@@ -147,7 +147,7 @@ app/Modules/Device/
 | Organization | Departments, staff list, transfers, profile changes to review | `DeptService`, `StaffService` | `depts.js`, `staff.js` |
 | Personnel | Personnel record, own profile, family, import / export | `PersonnelService`, `ChangeRequests`, `FamilyService`, `ImportExport`, `Fields` | `person.js`, `profile.js`, `family.js` |
 | Plan | Plan tree, my tasks, time labels | `PlanService`, `PlanLabel` | `plans.js`, `plan.js` |
-| Performance | Writing results, review, completion roll-up, execution statistics | `PerformanceService`, `PerfStatsService` | `perf.js`, `review.js`, `perfstats.js` |
+| Performance | Writing results, review, completion roll-up, execution statistics | `PerformanceService`, `PerfStatsService`, `LeaveService` (leave) | `perf.js`, `review.js`, `perfstats.js`, `leaves.js`, `leave.js` (my leave) |
 | Report | Comprehensive reports | `ReportService` | `reports.js` |
 | Affairs | To-dos (and handled items), issued items, notebook, notifications, reminder rules and the scheduler | `TodoService`, `IssueService`, `NoteService`, `NotificationService`, `RuleService`, `Scheduler`, `ReminderCalc` | `todo.js`, `issues.js`, `notes.js`, `notify.js`, `rules.js` |
 | Device | Device records, usage and monitoring, faults and repairs, collector API | `DeviceService`, `DeviceImport`, `CollectorService`, `RepairService` | `devices.js`, `device.js` (shared), `monitor.js`, `repair.js` |

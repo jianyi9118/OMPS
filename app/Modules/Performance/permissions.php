@@ -6,4 +6,6 @@
 return array(
     array('code' => 'perf.edit', 'group' => 'perf', 'action' => 'edit', 'roles' => array('unit_head', 'dept_head', 'member')),
     array('code' => 'perf.audit', 'group' => 'perf', 'action' => 'audit', 'roles' => array('unit_head', 'dept_head')),
+    // apply for my own leave (approved by whoever reviews my results)
+    array('code' => 'leave.apply', 'group' => 'perf', 'action' => 'leave', 'roles' => array('unit_head', 'dept_head', 'member')),
 );
